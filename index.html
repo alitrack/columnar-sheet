@@ -48,8 +48,13 @@
   <div id="toolbar">
     <h1>🦆 ColumnarSheet</h1>
     <button id="btn-quack" class="disconnected" onclick="connectQuack()">Quack: OFF</button>
-    <button id="btn-refresh" onclick="loadTable(currentTable)">⟳ Refresh</button>
-    <span id="status">Ready</span>
+    <button onclick="addRow()" title="Add row (Ctrl+Enter)">＋ Row</button>
+    <button onclick="deleteSelectedRows()" title="Delete selected rows">🗑 Del</button>
+    <button id="btn-refresh" onclick="loadTable(currentTable)">⟳</button>
+    <input id="formula-bar" placeholder="Click a cell to see its value, or type SQL..." 
+           style="flex:1;padding:5px 12px;background:#0d0d0d;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-family:monospace;font-size:13px;"
+           onkeydown="if(event.key==='Enter'){executeFormula();event.preventDefault()}">
+    <span id="status" style="min-width:200px">Ready</span>
   </div>
   <div id="content">
     <div id="grid-container"></div>
@@ -258,7 +263,6 @@ function renderGrid(columns, data) {
         const safeVal = newVal == null ? 'NULL' : `'${String(newVal).replace(/'/g, "''")}'`;
         const prefix = quackConnected ? 'remote.' : '';
         const updateInner = `UPDATE ${currentTable} SET "${colName}" = ${safeVal} WHERE _id = ${idVal}`;
-        // Escape inner quotes for remote.query()
         const sql = quackConnected
           ? `FROM ${prefix}query('${updateInner.replace(/'/g, "''")}')`
           : updateInner;
@@ -271,6 +275,10 @@ function renderGrid(columns, data) {
           console.error('Write-back error:', e);
         }
       }
+    },
+    afterSelection: (r, c) => {
+      const val = hot.getDataAtCell(r, c);
+      document.getElementById('formula-bar').value = val ?? '';
     }
   });
 }
@@ -374,6 +382,79 @@ function addMessage(role, text) {
   container.scrollTop = container.scrollHeight;
 }
 
+// ── Row Operations ──
+async function addRow() {
+  // Get current columns from the grid to build INSERT
+  const displayCols = hot.getColHeader().filter(c => c !== '_id');
+  if (!displayCols.length) return;
+
+  // Build INSERT with auto-increment _id
+  const prefix = quackConnected ? 'remote.' : '';
+  const colList = '"_id", ' + displayCols.map(c => `"${c}"`).join(', ');
+  const nextIdExpr = `(SELECT COALESCE(MAX(_id), 0) + 1 FROM ${currentTable})`;
+  const valList = `${nextIdExpr}, ` + displayCols.map(() => 'NULL').join(', ');
+  const insertInner = `INSERT INTO ${currentTable} (${colList}) VALUES (${valList})`;
+  const insertSql = quackConnected
+    ? `FROM ${prefix}query('${insertInner.replace(/'/g, "''")}')`
+    : insertInner;
+
+  try {
+    await conn.query(insertSql);
+    setStatus(`✅ New row added to ${currentTable}`);
+    await loadTable(currentTable);
+    // Scroll to bottom
+    hot.scrollViewportTo(hot.countRows() - 1, 0);
+  } catch(e) {
+    setStatus(`❌ Insert failed: ${e.message.substring(0, 50)}`);
+  }
+}
+
+async function deleteSelectedRows() {
+  const selected = hot.getSelected();
+  if (!selected || !selected.length) {
+    setStatus('Select rows first');
+    return;
+  }
+
+  const rowsToDelete = new Set();
+  for (const [r1, , r2] of selected) {
+    for (let r = Math.min(r1, r2); r <= Math.max(r1, r2); r++) {
+      rowsToDelete.add(_ids[r]);
+    }
+  }
+
+  if (!rowsToDelete.size) { setStatus('No rows selected'); return; }
+
+  const prefix = quackConnected ? 'remote.' : '';
+  for (const id of rowsToDelete) {
+    try {
+      const delSql = quackConnected
+        ? `FROM ${prefix}query('DELETE FROM ${currentTable} WHERE _id = ${id}')`
+        : `DELETE FROM ${currentTable} WHERE _id = ${id}`;
+      await conn.query(delSql);
+    } catch(e) {
+      setStatus(`❌ Delete id=${id} failed: ${e.message.substring(0, 40)}`);
+      return;
+    }
+  }
+  setStatus(`✅ Deleted ${rowsToDelete.size} row(s)`);
+  await loadTable(currentTable);
+}
+
+// ── Formula Bar ──
+function executeFormula() {
+  const bar = document.getElementById('formula-bar');
+  const val = bar.value.trim();
+  if (!val) return;
+
+  // If a cell is selected, write the value to it
+  const selected = hot.getSelected();
+  if (selected && selected.length) {
+    const [r, c] = selected[0];
+    hot.setDataAtCell(r, c, val, 'edit');
+  }
+}
+
 // ── UI Helpers ──
 function switchTab(tab) {
   document.querySelectorAll('#sidebar-tabs button').forEach(b => b.classList.remove('active'));
@@ -393,6 +474,9 @@ window.askAI = askAI;
 window.switchTab = switchTab;
 window.toggleAISettings = toggleAISettings;
 window.onAIBackendChange = onAIBackendChange;
+window.addRow = addRow;
+window.deleteSelectedRows = deleteSelectedRows;
+window.executeFormula = executeFormula;
 window.currentTable = currentTable;
 
 // ── Boot ──
