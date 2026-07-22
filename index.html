@@ -227,11 +227,18 @@ async function loadTable(name, append = false) {
   // Get total count first
   if (!append) {
     try {
-      const countResult = await conn.query(`SELECT count(*) AS cnt FROM ${prefix}${name}`);
-      const arr = countResult.toArray();
-      _totalRows = arr.length > 0 ? Number(arr[0][0]) : 0;
+      if (quackConnected) {
+        // Quack: count via remote.query
+        const cr = await conn.query(`FROM ${prefix}query('SELECT count(*)::BIGINT AS cnt FROM ${currentTable}')`);
+        _totalRows = Number(cr.toArray()[0][0]);
+      } else {
+        const cr = await conn.query(`SELECT count(*)::BIGINT AS cnt FROM ${currentTable}`);
+        _totalRows = Number(cr.toArray()[0][0]);
+      }
     } catch(e) {
-      _totalRows = 0;
+      console.warn('Count query failed:', e.message);
+      // Fallback: use loaded count, mark as estimated
+      _totalRows = newData?.length || 0;
     }
   }
 
@@ -290,7 +297,7 @@ function renderGrid(columns, data, append = false) {
   // Show/hide load more bar
   const bar = document.getElementById('load-more-bar');
   const btn = document.getElementById('load-more-btn');
-  if (_data.length < _totalRows) {
+  if (_data.length < _totalRows && _totalRows > 0) {
     bar.style.display = 'block';
     btn.textContent = `Load more... (${(_totalRows - _data.length).toLocaleString()} remaining)`;
   } else {
