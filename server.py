@@ -34,13 +34,8 @@ def main():
 
     # Load sample data
     sales_csv = os.path.join(DIR, "sample_data", "sales.csv")
-    row_count = con.execute(f"""
-        SELECT count(*) FROM (
-            SELECT * FROM read_csv_auto('{sales_csv}', header=true)
-        )
-    """).fetchone()[0]
-    con.execute(f"CREATE OR REPLACE TABLE sales AS SELECT * FROM read_csv_auto('{sales_csv}', header=true)")
-    log(f"Loaded sales table: {row_count} rows")
+    con.execute(f"CREATE OR REPLACE TABLE sales AS SELECT row_number() OVER () AS _id, * FROM read_csv_auto('{sales_csv}', header=true)")
+    log(f"Loaded sales table with _id column: {con.execute('SELECT count(*) FROM sales').fetchone()[0]} rows")
 
     # Start Quack
     result = con.execute(f"""

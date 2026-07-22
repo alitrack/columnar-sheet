@@ -60,11 +60,22 @@
       </div>
       <div id="ai-panel">
         <div id="ai-messages">
-          <div class="msg assistant">Ask me about your data. I'll write DuckDB SQL for you.</div>
+          <div class="msg assistant">Configure AI backend with ⚙️ button, then ask me about your data.</div>
         </div>
         <div id="ai-input-area">
           <input id="ai-input" placeholder="e.g. Show top 3 products by revenue..." onkeydown="if(event.key==='Enter')askAI()">
           <button id="ai-send" onclick="askAI()">Send</button>
+          <button id="ai-settings-btn" onclick="toggleAISettings()" style="background:#2a2a2a;color:#888;border:1px solid #333;border-radius:4px;cursor:pointer;padding:8px 10px;font-size:16px;">⚙️</button>
+        </div>
+        <div id="ai-settings" style="display:none;padding:8px;margin-top:8px;background:#0d0d0d;border-radius:4px;">
+          <select id="ai-backend" onchange="onAIBackendChange()" style="width:100%;padding:6px;background:#1a1a1a;color:#e0e0e0;border:1px solid #333;border-radius:4px;margin-bottom:6px;">
+            <option value="local">🖥️ Local (Ollama)</option>
+            <option value="xai">✖️ xAI (Grok)</option>
+            <option value="openai">🧠 OpenAI</option>
+          </select>
+          <input id="ai-api-key" type="password" placeholder="API Key (local = skip)" style="width:100%;padding:6px;background:#1a1a1a;color:#e0e0e0;border:1px solid #333;border-radius:4px;margin-bottom:6px;">
+          <input id="ai-endpoint" placeholder="Endpoint URL (default auto)" style="width:100%;padding:6px;background:#1a1a1a;color:#e0e0e0;border:1px solid #333;border-radius:4px;margin-bottom:6px;">
+          <input id="ai-model" placeholder="Model name (default auto)" style="width:100%;padding:6px;background:#1a1a1a;color:#e0e0e0;border:1px solid #333;border-radius:4px;">
         </div>
       </div>
       <div id="table-list" style="display:none"></div>
@@ -161,8 +172,8 @@ async function loadTableList() {
   try {
     let tables;
     if (quackConnected) {
-      // Quack: list tables from remote (information_schema may not be available, use duckdb_tables instead)
-      const result = await conn.query(`SELECT table_name FROM remote.duckdb_tables()`);
+      // Quack: use query() to run SHOW TABLES on remote server
+      const result = await conn.query(`FROM remote.query('SHOW TABLES')`);
       tables = result.toArray().map(r => r[0]);
     } else {
       const result = await conn.query(`SELECT table_name FROM duckdb_tables()`);
@@ -183,11 +194,22 @@ async function loadTable(name) {
   setStatus(`Loading ${name}...`);
 
   const prefix = quackConnected ? 'remote.' : '';
-  const result = await conn.query(`SELECT * FROM ${prefix}${name} LIMIT 1000`);
-  const columns = result.schema.fields.map(f => f.name);
+
+  // Use _id as primary key for write-back targeting
+  const result = await conn.query(`SELECT _id, * FROM ${prefix}${name} LIMIT 1000`);
+  const allCols = result.schema.fields.map(f => f.name);
+  const columns = allCols.filter(c => c !== '_id'); // display columns (exclude _id)
+  _ids = []; // store _id values for write-back
   const data = result.toArray().map(row => {
     const obj = {};
-    columns.forEach((col, i) => obj[col] = row[i]);
+    allCols.forEach((col, i) => {
+      if (col === '_id') {
+        obj._id = row[i];
+        _ids.push(row[i]);
+      } else {
+        obj[col] = row[i];
+      }
+    });
     return obj;
   });
 
@@ -198,16 +220,23 @@ async function loadTable(name) {
   await loadTableList();
 }
 
+let _ids = []; // current _id values for write-back
+
 // ── Render Handsontable grid ──
 function renderGrid(columns, data) {
   const container = document.getElementById('grid-container');
   container.innerHTML = '';
 
+  const displayColumns = columns.filter(c => c !== '_id');
+
   hot = new Handsontable(container, {
     data: data,
-    columns: columns.map(c => ({ data: c, title: c })),
+    columns: columns.map(c => {
+      if (c === '_id') return { data: c, width: 0 };
+      return { data: c, title: c };
+    }),
     rowHeaders: true,
-    colHeaders: columns,
+    colHeaders: displayColumns,
     licenseKey: 'non-commercial-and-evaluation',
     height: '100%',
     width: '100%',
@@ -219,14 +248,61 @@ function renderGrid(columns, data) {
     manualColumnResize: true,
     afterChange: async (changes, source) => {
       if (source === 'loadData') return;
-      if (!quackConnected) return;
-      // TODO: sync changes back to Quack server
-      console.log('Cell changed:', changes);
+      if (!changes) return;
+      for (const [row, col, oldVal, newVal] of changes) {
+        if (oldVal === newVal) continue;
+        const idVal = _ids[row];
+        const colName = columns[hot.propToCol(col)];
+        if (!idVal || !colName || colName === '_id') continue;
+
+        const safeVal = newVal == null ? 'NULL' : `'${String(newVal).replace(/'/g, "''")}'`;
+        const prefix = quackConnected ? 'remote.' : '';
+        const updateInner = `UPDATE ${currentTable} SET "${colName}" = ${safeVal} WHERE _id = ${idVal}`;
+        // Escape inner quotes for remote.query()
+        const sql = quackConnected
+          ? `FROM ${prefix}query('${updateInner.replace(/'/g, "''")}')`
+          : updateInner;
+
+        try {
+          await conn.query(sql);
+          setStatus(`✅ Updated ${currentTable}."${colName}" [id=${idVal}]`);
+        } catch(e) {
+          setStatus(`❌ Write failed: ${e.message.substring(0, 50)}`);
+          console.error('Write-back error:', e);
+        }
+      }
     }
   });
 }
 
 // ── AI Assistant ──
+function getAIConfig() {
+  const backend = document.getElementById('ai-backend').value;
+  const key = document.getElementById('ai-api-key').value.trim();
+  const endpoint = document.getElementById('ai-endpoint').value.trim();
+  const model = document.getElementById('ai-model').value.trim();
+
+  const defaults = {
+    local:  { url: endpoint || 'http://localhost:11434/v1/chat/completions', model: model || 'qwen2.5:14b', key: 'ollama' },
+    xai:    { url: endpoint || 'https://api.x.ai/v1/chat/completions', model: model || 'grok-4', key: key },
+    openai: { url: endpoint || 'https://api.openai.com/v1/chat/completions', model: model || 'gpt-4o', key: key },
+  };
+  const cfg = defaults[backend] || defaults.local;
+  return { url: cfg.url, model: cfg.model, key: cfg.key };
+}
+
+function toggleAISettings() {
+  const el = document.getElementById('ai-settings');
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+}
+
+function onAIBackendChange() {
+  const backend = document.getElementById('ai-backend').value;
+  const keyInput = document.getElementById('ai-api-key');
+  keyInput.style.display = backend === 'local' ? 'none' : 'block';
+  if (backend === 'local') keyInput.value = '';
+}
+
 async function askAI() {
   const input = document.getElementById('ai-input');
   const question = input.value.trim();
@@ -235,45 +311,45 @@ async function askAI() {
 
   addMessage('user', question);
 
-  // Get schema
+  // Get schema using DESCRIBE (works for both local and remote)
   let schemaInfo;
   try {
     const prefix = quackConnected ? 'remote.' : '';
-    const r = await conn.query(`SELECT column_name, data_type FROM ${prefix}information_schema.columns WHERE table_name='${currentTable}'`);
+    const r = await conn.query(`DESCRIBE ${prefix}${currentTable}`);
     schemaInfo = r.toArray().map(r => `${r[0]} (${r[1]})`).join(', ');
   } catch(e) {
     schemaInfo = '(schema unavailable)';
   }
 
-  // Generate SQL prompt
-  const sqlPrompt = `You are a DuckDB SQL expert. Given schema: ${schemaInfo}. Table: ${currentTable}.
-Convert this to DuckDB SQL: "${question}"
-Return ONLY the SQL, no explanation, no markdown.`;
+  const sqlPrompt = `You are a DuckDB SQL expert. Schema: ${schemaInfo}. Table: ${currentTable}.\nConvert to DuckDB SQL: "${question}"\nReturn ONLY the SQL, no explanation, no markdown.`;
 
   addMessage('assistant', '🤔 Generating SQL...');
 
   try {
-    // Try Grok search API for LLM (user's configured backend)
-    const aiResp = await fetch('https://api.x.ai/v1/chat/completions', {
+    const cfg = getAIConfig();
+    if (!cfg.key) throw new Error('API key not configured. Click ⚙️ to set up.');
+
+    const aiResp = await fetch(cfg.url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('ai_key') || prompt('Enter xAI API key (saved locally):')) },
-      body: JSON.stringify({ model: 'grok-4', messages: [{ role: 'user', content: sqlPrompt }], temperature: 0 })
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.key}` },
+      body: JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content: sqlPrompt }], temperature: 0 })
     });
 
-    if (!aiResp.ok) throw new Error(`AI API error: ${aiResp.status}`);
+    if (!aiResp.ok) {
+      const errText = await aiResp.text().catch(() => '');
+      throw new Error(`AI API ${aiResp.status}: ${errText.substring(0, 80)}`);
+    }
 
     const aiData = await aiResp.json();
-    // Save key if new
-    if (!localStorage.getItem('ai_key')) localStorage.setItem('ai_key', '...'); // handled by prompt
-
     let sql = aiData.choices[0].message.content.trim();
     sql = sql.replace(/```sql\n?/g, '').replace(/```/g, '').trim();
 
     addMessage('assistant', `<div class="sql">${sql}</div>`);
 
-    // Execute SQL
+    // Execute SQL — use remote prefix for table references
     const prefix = quackConnected ? 'remote.' : '';
-    const execResult = await conn.query(sql.replace(new RegExp(currentTable, 'g'), `${prefix}${currentTable}`));
+    const execSql = sql.replace(new RegExp(`\\b${currentTable}\\b`, 'g'), `${prefix}${currentTable}`);
+    const execResult = await conn.query(execSql);
     const cols = execResult.schema.fields.map(f => f.name);
     const rows = execResult.toArray().map(row => {
       const obj = {};
@@ -285,7 +361,7 @@ Return ONLY the SQL, no explanation, no markdown.`;
     addMessage('assistant', `✅ ${rows.length} rows returned`);
     setStatus(`Query done: ${rows.length} rows`);
   } catch (e) {
-    addMessage('assistant', `❌ Error: ${e.message}`);
+    addMessage('assistant', `❌ ${e.message}`);
   }
 }
 
@@ -315,6 +391,8 @@ window.loadTable = loadTable;
 window.connectQuack = connectQuack;
 window.askAI = askAI;
 window.switchTab = switchTab;
+window.toggleAISettings = toggleAISettings;
+window.onAIBackendChange = onAIBackendChange;
 window.currentTable = currentTable;
 
 // ── Boot ──
