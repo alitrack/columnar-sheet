@@ -1,11 +1,101 @@
 product,category,revenue,quantity,region,date
-Widget,A,1200000,340,North,2026-01-15
-Gadget,B,890000,210,East,2026-01-20
-Gizmo,A,540000,150,South,2026-02-01
-Rocket,C,2100000,89,North,2026-02-10
-Anvil,B,330000,420,West,2026-02-20
-Dynamite,C,180000,560,East,2026-03-01
-Laser,A,1500000,78,South,2026-03-10
-Magnet,B,670000,230,West,2026-03-20
-Piston,C,430000,310,North,2026-04-01
-Spring,A,290000,180,East,2026-04-15
+Rocket Fuel,Industrial,39338,16,South,2025-08-17
+Anvil Heavy,Industrial,55620,198,Central,2025-03-31
+Safety Goggles,Safety,1444,118,North,2025-08-12
+Magnet Strong,Industrial,102537,139,Central,2025-07-23
+Drill Bit Set,Hardware,9478,117,Central,2025-10-12
+Widget Pro,Electronics,68944,50,East,2025-10-12
+Anvil Heavy,Industrial,27426,65,East,2025-04-15
+Gizmo Lite,Home,49018,107,East,2025-09-28
+Gadget X,Electronics,179623,196,North,2026-01-23
+Gizmo Lite,Home,77184,151,Central,2026-01-06
+Safety Goggles,Safety,1019,59,North,2025-08-22
+Spring Coil,Automotive,10680,30,North,2026-01-25
+Piston Max,Automotive,60564,126,East,2025-06-16
+Nut M12,Hardware,723,100,East,2025-03-15
+Gloves Nitrile,Safety,2741,172,South,2025-06-17
+Adapter HDMI,Electronics,3501,107,Central,2025-08-13
+Bolt M12,Hardware,263,24,North,2025-11-20
+Washer Flat,Hardware,194,78,Central,2025-11-19
+Laser Cutter,Electronics,278672,177,West,2025-05-27
+Piston Max,Automotive,17866,45,Central,2025-09-27
+Safety Goggles,Safety,2229,119,West,2026-01-06
+Magnet Strong,Industrial,31801,45,North,2025-02-18
+Rocket Fuel,Industrial,114602,49,West,2025-03-07
+Washer Flat,Hardware,352,107,West,2026-06-26
+Piston Max,Automotive,79889,151,North,2025-04-28
+Drill Bit Set,Hardware,8221,78,East,2025-04-25
+Spring Coil,Automotive,30846,121,North,2025-09-27
+Brush Set,Home,1275,55,North,2025-11-02
+Brush Set,Home,3265,165,East,2025-06-15
+Drill Bit Set,Hardware,16250,145,Central,2025-11-28
+Paint Blue,Home,539,14,East,2025-11-11
+Magnet Strong,Industrial,14800,24,Central,2025-03-22
+Gizmo Lite,Home,110953,197,North,2026-06-30
+Anvil Heavy,Industrial,15660,42,Central,2025-06-19
+Piston Max,Automotive,77078,145,West,2025-08-05
+Drill Bit Set,Hardware,19972,196,East,2026-02-13
+Nut M12,Hardware,1219,122,West,2025-05-04
+Magnet Strong,Industrial,37349,67,North,2025-08-24
+Safety Goggles,Safety,795,66,North,2025-08-23
+Gizmo Lite,Home,11953,18,North,2026-06-11
+Magnet Strong,Industrial,61568,81,South,2025-05-16
+Safety Goggles,Safety,2440,157,West,2026-02-21
+Laser Cutter,Electronics,43271,34,West,2025-12-29
+Cable USB-C,Electronics,2971,115,North,2025-04-11
+Gadget X,Electronics,117074,113,North,2025-09-12
+Laser Cutter,Electronics,92928,58,South,2026-03-09
+Dynamite Stix,Mining,15036,81,North,2026-03-30
+Drill Bit Set,Hardware,2570,35,Central,2025-01-16
+Gizmo Lite,Home,33383,70,West,2026-05-08
+Laser Cutter,Electronics,210205,112,South,2026-01-24
+Widget Pro,Electronics,121984,109,West,2025-10-20
+Cable USB-C,Electronics,6009,188,Central,2026-05-14
+Anvil Heavy,Industrial,18151,58,North,2025-03-04
+Bolt M12,Hardware,237,24,West,2026-05-30
+Brush Set,Home,911,50,Central,2025-03-24
+Dynamite Stix,Mining,5333,27,South,2026-02-18
+Rocket Fuel,Industrial,300471,155,Central,2025-02-10
+Gloves Nitrile,Safety,545,30,Central,2026-06-20
+Bolt M12,Hardware,822,76,East,2025-09-02
+Piston Max,Automotive,41307,111,East,2026-04-14
+Bolt M12,Hardware,270,28,Central,2025-04-13
+Gizmo Lite,Home,71964,147,East,2025-05-16
+Nut M12,Hardware,267,27,East,2025-10-19
+Dynamite Stix,Mining,26722,122,East,2026-06-26
+Widget Pro,Electronics,261047,180,East,2025-04-17
+Anvil Heavy,Industrial,21794,77,North,2025-06-09
+Piston Max,Automotive,38871,82,East,2025-07-28
+Piston Max,Automotive,62415,139,North,2025-04-05
+Cable USB-C,Electronics,1644,80,East,2025-05-14
+Piston Max,Automotive,25671,51,Central,2026-03-14
+Drill Bit Set,Hardware,914,12,South,2025-02-06
+Nut M12,Hardware,1369,159,West,2025-05-11
+Gadget X,Electronics,76935,88,North,2026-01-02
+Laser Cutter,Electronics,255235,184,North,2025-12-29
+Drill Bit Set,Hardware,13057,114,South,2025-08-31
+Dynamite Stix,Mining,12283,55,North,2025-07-03
+Bolt M12,Hardware,1657,115,South,2025-10-01
+Dynamite Stix,Mining,29054,189,North,2026-04-27
+Magnet Strong,Industrial,49382,61,West,2025-12-25
+Spring Coil,Automotive,17974,68,South,2026-02-13
+Bolt M12,Hardware,1197,81,East,2025-12-26
+Brush Set,Home,2808,112,Central,2025-12-06
+Widget Pro,Electronics,57962,39,East,2025-07-02
+Safety Goggles,Safety,946,77,Central,2026-03-21
+Nut M12,Hardware,1870,196,West,2026-06-08
+Rocket Fuel,Industrial,283443,108,South,2025-09-18
+Gadget X,Electronics,173054,191,Central,2025-07-21
+Nut M12,Hardware,801,120,East,2025-11-18
+Rocket Fuel,Industrial,509259,194,Central,2025-11-13
+Cable USB-C,Electronics,2327,93,East,2025-05-11
+Laser Cutter,Electronics,198747,117,West,2025-06-28
+Gloves Nitrile,Safety,2651,155,Central,2025-01-01
+Spring Coil,Automotive,21785,83,Central,2025-11-26
+Adapter HDMI,Electronics,4395,123,South,2026-06-08
+Paint Blue,Home,7883,198,North,2025-10-18
+Brush Set,Home,4396,179,East,2025-04-06
+Magnet Strong,Industrial,116478,182,South,2025-05-31
+Widget Pro,Electronics,23245,21,West,2025-03-16
+Adapter HDMI,Electronics,5046,116,Central,2025-07-19
+Washer Flat,Hardware,407,136,South,2025-01-06

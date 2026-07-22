@@ -51,6 +51,9 @@
     <button onclick="addRow()" title="Add row (Ctrl+Enter)">＋ Row</button>
     <button onclick="deleteSelectedRows()" title="Delete selected rows">🗑 Del</button>
     <button id="btn-refresh" onclick="loadTable(currentTable)">⟳</button>
+    <button onclick="document.getElementById('csv-upload').click()" title="Import CSV">📥 CSV</button>
+    <button onclick="exportCSV()" title="Export to CSV">📤 CSV</button>
+    <input id="csv-upload" type="file" accept=".csv" style="display:none" onchange="importCSV(event)">
     <input id="formula-bar" placeholder="Click a cell to see its value, or type SQL..." 
            style="flex:1;padding:5px 12px;background:#0d0d0d;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-family:monospace;font-size:13px;"
            onkeydown="if(event.key==='Enter'){executeFormula();event.preventDefault()}">
@@ -441,7 +444,48 @@ async function deleteSelectedRows() {
   await loadTable(currentTable);
 }
 
-// ── Formula Bar ──
+// ── CSV Import/Export ──
+async function importCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  setStatus(`Importing ${file.name}...`);
+
+  const text = await file.text();
+  const tableName = file.name.replace(/\.csv$/i, '').replace(/[^a-zA-Z0-9_]/g, '_');
+
+  // Register file in DuckDB-Wasm virtual FS and create table
+  await db.registerFileText('_import.csv', text);
+  const prefix = quackConnected ? 'remote.' : '';
+
+  if (quackConnected) {
+    // Import to remote via query
+    const createSql = `CREATE TABLE ${tableName} AS SELECT row_number() OVER () AS _id, * FROM read_csv_auto('_import.csv', header=true)`;
+    await conn.query(`FROM ${prefix}query('${createSql.replace(/'/g, "''")}')`);
+  } else {
+    await conn.query(`CREATE TABLE ${tableName} AS SELECT row_number() OVER () AS _id, * FROM read_csv_auto('_import.csv', header=true)`);
+  }
+
+  currentTable = tableName;
+  await loadTableList();
+  await loadTable(tableName);
+  setStatus(`✅ Imported ${tableName}: ${hot.countRows()} rows`);
+  event.target.value = '';
+}
+
+function exportCSV() {
+  const data = hot.getData();
+  const headers = hot.getColHeader();
+  const csv = [headers.join(','), ...data.map(row => row.map(v => `"${(v ?? '').toString().replace(/"/g, '""')}"`).join(','))].join('\n');
+
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${currentTable}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+  setStatus(`✅ Exported ${data.length} rows`);
+}
 function executeFormula() {
   const bar = document.getElementById('formula-bar');
   const val = bar.value.trim();
@@ -477,6 +521,8 @@ window.onAIBackendChange = onAIBackendChange;
 window.addRow = addRow;
 window.deleteSelectedRows = deleteSelectedRows;
 window.executeFormula = executeFormula;
+window.importCSV = importCSV;
+window.exportCSV = exportCSV;
 window.currentTable = currentTable;
 
 // ── Boot ──
