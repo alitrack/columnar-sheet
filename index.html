@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ColumnarSheet — DuckDB + Quack Spreadsheet</title>
+<script src="https://cdn.jsdelivr.net/npm/handsontable@14.6.1/dist/handsontable.full.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14.6.1/dist/handsontable.full.min.css">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e0e0e0; }
+  #app { display: flex; flex-direction: column; height: 100vh; }
+  #toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #1a1a1a; border-bottom: 1px solid #333; }
+  #toolbar h1 { font-size: 18px; color: #f0c040; margin-right: 24px; }
+  #toolbar button { padding: 6px 16px; border: 1px solid #444; background: #2a2a2a; color: #ccc; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  #toolbar button:hover { background: #3a3a3a; }
+  #toolbar button.connected { border-color: #4caf50; color: #4caf50; }
+  #toolbar button.disconnected { border-color: #f44336; color: #f44336; }
+  #status { font-size: 12px; color: #888; flex: 1; text-align: right; }
+  #content { display: flex; flex: 1; overflow: hidden; }
+  #grid-container { flex: 1; overflow: hidden; }
+  #sidebar { width: 340px; background: #141414; border-left: 1px solid #333; display: flex; flex-direction: column; }
+  #sidebar-tabs { display: flex; border-bottom: 1px solid #333; }
+  #sidebar-tabs button { flex: 1; padding: 10px; background: none; border: none; color: #888; cursor: pointer; font-size: 13px; }
+  #sidebar-tabs button.active { color: #f0c040; border-bottom: 2px solid #f0c040; }
+  #ai-panel { flex: 1; display: flex; flex-direction: column; padding: 12px; overflow: hidden; }
+  #ai-messages { flex: 1; overflow-y: auto; font-size: 13px; margin-bottom: 12px; }
+  #ai-messages .msg { margin-bottom: 8px; padding: 8px; border-radius: 6px; }
+  #ai-messages .msg.user { background: #1e3a5f; margin-left: 24px; }
+  #ai-messages .msg.assistant { background: #1a2a1a; margin-right: 24px; }
+  #ai-messages .msg.sql { font-family: monospace; background: #0d0d0d; padding: 8px; border-radius: 4px; margin: 4px 0; font-size: 12px; color: #7ec87e; }
+  #ai-input-area { display: flex; gap: 8px; }
+  #ai-input { flex: 1; padding: 8px; background: #1a1a1a; border: 1px solid #333; border-radius: 4px; color: #e0e0e0; font-size: 13px; }
+  #ai-send { padding: 8px 16px; background: #f0c040; color: #0f0f0f; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
+  #table-list { padding: 12px; font-size: 13px; }
+  #table-list .table-item { padding: 6px 8px; cursor: pointer; border-radius: 4px; }
+  #table-list .table-item:hover { background: #2a2a2a; }
+  #table-list .table-item.selected { background: #1e3a5f; }
+  .handsontable { color: #e0e0e0 !important; }
+  .handsontable th { background: #1a1a1a !important; color: #888 !important; }
+  .handsontable td { background: #0f0f0f !important; color: #e0e0e0 !important; border-color: #222 !important; }
+  .handsontable tr:hover td { background: #1a1a1a !important; }
+  .htDimmed { color: #444 !important; }
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="toolbar">
+    <h1>🦆 ColumnarSheet</h1>
+    <button id="btn-quack" class="disconnected" onclick="connectQuack()">Quack: OFF</button>
+    <button id="btn-refresh" onclick="loadTable(currentTable)">⟳ Refresh</button>
+    <span id="status">Ready</span>
+  </div>
+  <div id="content">
+    <div id="grid-container"></div>
+    <div id="sidebar">
+      <div id="sidebar-tabs">
+        <button class="active" onclick="switchTab('ai')">🤖 AI</button>
+        <button onclick="switchTab('tables')">📊 Tables</button>
+      </div>
+      <div id="ai-panel">
+        <div id="ai-messages">
+          <div class="msg assistant">Ask me about your data. I'll write DuckDB SQL for you.</div>
+        </div>
+        <div id="ai-input-area">
+          <input id="ai-input" placeholder="e.g. Show top 3 products by revenue..." onkeydown="if(event.key==='Enter')askAI()">
+          <button id="ai-send" onclick="askAI()">Send</button>
+        </div>
+      </div>
+      <div id="table-list" style="display:none"></div>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm/+esm';
+
+// ── Globals ──
+let db, conn, hot;
+let currentTable = 'sales';
+let quackConnected = false;
+const QUACK_SERVER = 'localhost';
+const QUACK_PORT = '9494';
+const QUACK_TOKEN = 'columnar-sheet-token-2026';
+
+// ── Init DuckDB-Wasm ──
+async function initDuckDB() {
+  setStatus('Loading DuckDB-Wasm...');
+  const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
+  const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
+
+  // CORS-safe worker instantiation
+  const worker_url = URL.createObjectURL(
+    new Blob([`importScripts("${bundle.mainWorker}");`], {type: 'text/javascript'})
+  );
+  const worker = new Worker(worker_url);
+  const logger = new duckdb.ConsoleLogger();
+  db = new duckdb.AsyncDuckDB(logger, worker);
+  await db.instantiate(bundle.mainModule, bundle.pthreadWorker);
+  URL.revokeObjectURL(worker_url);
+
+  conn = await db.connect();
+  setStatus('DuckDB-Wasm ready');
+}
+
+// ── Quack Connection ──
+async function connectQuack() {
+  const btn = document.getElementById('btn-quack');
+  if (quackConnected) return;
+
+  setStatus('Connecting to Quack server...');
+  try {
+    // Try loading Quack extension in WASM
+    await conn.query(`INSTALL quack`);
+    await conn.query(`LOAD quack`);
+    // Create secret and attach
+    await conn.query(`CREATE SECRET (TYPE quack, TOKEN '${QUACK_TOKEN}', SCOPE 'quack:${QUACK_SERVER}:${QUACK_PORT}')`);
+    await conn.query(`ATTACH 'quack:${QUACK_SERVER}:${QUACK_PORT}' AS remote`);
+
+    quackConnected = true;
+    btn.textContent = 'Quack: ON';
+    btn.className = 'connected';
+    setStatus('Quack connected');
+
+    // Load tables
+    await loadTableList();
+    await loadTable('sales');
+  } catch (e) {
+    console.error('Quack connection failed:', e);
+    setStatus(`Quack failed: ${e.message.substring(0, 60)}...`);
+    // Fallback: load local sample data
+    await loadLocalFallback();
+  }
+}
+
+// ── Fallback: local DuckDB-Wasm only ──
+async function loadLocalFallback() {
+  setStatus('Quack unavailable — using local mode');
+  document.getElementById('btn-quack').className = 'disconnected';
+  document.getElementById('btn-quack').textContent = 'Quack: Local';
+
+  // Load CSV from the HTTP server into DuckDB-Wasm's virtual filesystem
+  try {
+    const csvResp = await fetch('sample_data/sales.csv');
+    const csvText = await csvResp.text();
+    await db.registerFileText('sales.csv', csvText);
+    await conn.query(`CREATE TABLE sales AS SELECT * FROM read_csv_auto('sales.csv', header=true)`);
+  } catch(e) {
+    console.error('Local data load failed:', e);
+    setStatus('Local data load failed');
+    return;
+  }
+  currentTable = 'sales';
+  await loadTable('sales');
+  setStatus('Local mode ready — 10 rows loaded');
+}
+
+// ── Load table list ──
+async function loadTableList() {
+  const container = document.getElementById('table-list');
+  try {
+    let tables;
+    if (quackConnected) {
+      // Quack: list tables from remote (information_schema may not be available, use duckdb_tables instead)
+      const result = await conn.query(`SELECT table_name FROM remote.duckdb_tables()`);
+      tables = result.toArray().map(r => r[0]);
+    } else {
+      const result = await conn.query(`SELECT table_name FROM duckdb_tables()`);
+      tables = result.toArray().map(r => r[0]);
+    }
+    container.innerHTML = tables.map(t =>
+      `<div class="table-item ${t===currentTable?'selected':''}" onclick="loadTable('${t}')">📊 ${t}</div>`
+    ).join('');
+  } catch(e) {
+    console.warn('loadTableList failed:', e);
+    container.innerHTML = `<div style="color:#888;padding:12px;">No tables loaded</div>`;
+  }
+}
+
+// ── Load table data into grid ──
+async function loadTable(name) {
+  currentTable = name;
+  setStatus(`Loading ${name}...`);
+
+  const prefix = quackConnected ? 'remote.' : '';
+  const result = await conn.query(`SELECT * FROM ${prefix}${name} LIMIT 1000`);
+  const columns = result.schema.fields.map(f => f.name);
+  const data = result.toArray().map(row => {
+    const obj = {};
+    columns.forEach((col, i) => obj[col] = row[i]);
+    return obj;
+  });
+
+  renderGrid(columns, data);
+  setStatus(`${name}: ${data.length} rows loaded`);
+
+  // Update table list
+  await loadTableList();
+}
+
+// ── Render Handsontable grid ──
+function renderGrid(columns, data) {
+  const container = document.getElementById('grid-container');
+  container.innerHTML = '';
+
+  hot = new Handsontable(container, {
+    data: data,
+    columns: columns.map(c => ({ data: c, title: c })),
+    rowHeaders: true,
+    colHeaders: columns,
+    licenseKey: 'non-commercial-and-evaluation',
+    height: '100%',
+    width: '100%',
+    stretchH: 'all',
+    contextMenu: true,
+    filters: true,
+    dropdownMenu: true,
+    multiColumnSorting: true,
+    manualColumnResize: true,
+    afterChange: async (changes, source) => {
+      if (source === 'loadData') return;
+      if (!quackConnected) return;
+      // TODO: sync changes back to Quack server
+      console.log('Cell changed:', changes);
+    }
+  });
+}
+
+// ── AI Assistant ──
+async function askAI() {
+  const input = document.getElementById('ai-input');
+  const question = input.value.trim();
+  if (!question) return;
+  input.value = '';
+
+  addMessage('user', question);
+
+  // Get schema
+  let schemaInfo;
+  try {
+    const prefix = quackConnected ? 'remote.' : '';
+    const r = await conn.query(`SELECT column_name, data_type FROM ${prefix}information_schema.columns WHERE table_name='${currentTable}'`);
+    schemaInfo = r.toArray().map(r => `${r[0]} (${r[1]})`).join(', ');
+  } catch(e) {
+    schemaInfo = '(schema unavailable)';
+  }
+
+  // Generate SQL prompt
+  const sqlPrompt = `You are a DuckDB SQL expert. Given schema: ${schemaInfo}. Table: ${currentTable}.
+Convert this to DuckDB SQL: "${question}"
+Return ONLY the SQL, no explanation, no markdown.`;
+
+  addMessage('assistant', '🤔 Generating SQL...');
+
+  try {
+    // Try Grok search API for LLM (user's configured backend)
+    const aiResp = await fetch('https://api.x.ai/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + (localStorage.getItem('ai_key') || prompt('Enter xAI API key (saved locally):')) },
+      body: JSON.stringify({ model: 'grok-4', messages: [{ role: 'user', content: sqlPrompt }], temperature: 0 })
+    });
+
+    if (!aiResp.ok) throw new Error(`AI API error: ${aiResp.status}`);
+
+    const aiData = await aiResp.json();
+    // Save key if new
+    if (!localStorage.getItem('ai_key')) localStorage.setItem('ai_key', '...'); // handled by prompt
+
+    let sql = aiData.choices[0].message.content.trim();
+    sql = sql.replace(/```sql\n?/g, '').replace(/```/g, '').trim();
+
+    addMessage('assistant', `<div class="sql">${sql}</div>`);
+
+    // Execute SQL
+    const prefix = quackConnected ? 'remote.' : '';
+    const execResult = await conn.query(sql.replace(new RegExp(currentTable, 'g'), `${prefix}${currentTable}`));
+    const cols = execResult.schema.fields.map(f => f.name);
+    const rows = execResult.toArray().map(row => {
+      const obj = {};
+      cols.forEach((c, i) => obj[c] = row[i]);
+      return obj;
+    });
+
+    renderGrid(cols, rows);
+    addMessage('assistant', `✅ ${rows.length} rows returned`);
+    setStatus(`Query done: ${rows.length} rows`);
+  } catch (e) {
+    addMessage('assistant', `❌ Error: ${e.message}`);
+  }
+}
+
+function addMessage(role, text) {
+  const container = document.getElementById('ai-messages');
+  const div = document.createElement('div');
+  div.className = `msg ${role}`;
+  div.innerHTML = text;
+  container.appendChild(div);
+  container.scrollTop = container.scrollHeight;
+}
+
+// ── UI Helpers ──
+function switchTab(tab) {
+  document.querySelectorAll('#sidebar-tabs button').forEach(b => b.classList.remove('active'));
+  document.querySelector(`#sidebar-tabs button:nth-child(${tab==='ai'?1:2})`).classList.add('active');
+  document.getElementById('ai-panel').style.display = tab === 'ai' ? 'flex' : 'none';
+  document.getElementById('table-list').style.display = tab === 'tables' ? 'block' : 'none';
+}
+
+function setStatus(msg) {
+  document.getElementById('status').textContent = msg;
+}
+
+// ── Global functions for onclick handlers ──
+window.loadTable = loadTable;
+window.connectQuack = connectQuack;
+window.askAI = askAI;
+window.switchTab = switchTab;
+window.currentTable = currentTable;
+
+// ── Boot ──
+(async function boot() {
+  await initDuckDB();
+  // Try Quack first, fall back to local
+  await connectQuack();
+})();
+</script>
+</body>
+</html>

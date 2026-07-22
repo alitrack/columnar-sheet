@@ -1,0 +1,11 @@
+product,category,revenue,quantity,region,date
+Widget,A,1200000,340,North,2026-01-15
+Gadget,B,890000,210,East,2026-01-20
+Gizmo,A,540000,150,South,2026-02-01
+Rocket,C,2100000,89,North,2026-02-10
+Anvil,B,330000,420,West,2026-02-20
+Dynamite,C,180000,560,East,2026-03-01
+Laser,A,1500000,78,South,2026-03-10
+Magnet,B,670000,230,West,2026-03-20
+Piston,C,430000,310,North,2026-04-01
+Spring,A,290000,180,East,2026-04-15
