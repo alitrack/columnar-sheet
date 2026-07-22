@@ -60,11 +60,19 @@
     <span id="status" style="min-width:200px">Ready</span>
   </div>
   <div id="content">
-    <div id="grid-container"></div>
+    <div id="grid-area" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
+      <div id="grid-container" style="flex:1;overflow:hidden;"></div>
+      <div id="load-more-bar" style="display:none;padding:8px;text-align:center;background:#1a1a1a;border-top:1px solid #333;">
+        <button id="load-more-btn" onclick="loadMore()" style="padding:6px 24px;background:#2a2a2a;color:#ccc;border:1px solid #444;border-radius:4px;cursor:pointer;font-size:13px;">
+          Load more rows...
+        </button>
+      </div>
+    </div>
     <div id="sidebar">
       <div id="sidebar-tabs">
         <button class="active" onclick="switchTab('ai')">🤖 AI</button>
         <button onclick="switchTab('tables')">📊 Tables</button>
+        <button onclick="switchTab('stats')">📈 Stats</button>
       </div>
       <div id="ai-panel">
         <div id="ai-messages">
@@ -87,6 +95,9 @@
         </div>
       </div>
       <div id="table-list" style="display:none"></div>
+      <div id="stats-panel" style="display:none;padding:12px;overflow-y:auto;font-size:13px;">
+        <div id="stats-content">Click a table to load stats</div>
+      </div>
     </div>
   </div>
 </div>
@@ -197,18 +208,40 @@ async function loadTableList() {
 }
 
 // ── Load table data into grid ──
-async function loadTable(name) {
+const PAGE_SIZE = 500;
+let _pageOffset = 0;
+let _totalRows = 0;
+let _columns = [];
+let _data = [];
+
+async function loadTable(name, append = false) {
   currentTable = name;
-  setStatus(`Loading ${name}...`);
+  if (!append) {
+    _pageOffset = 0;
+    _data = [];
+  }
+  setStatus(`Loading ${name} (offset ${append ? _pageOffset : 0})...`);
 
   const prefix = quackConnected ? 'remote.' : '';
 
-  // Use _id as primary key for write-back targeting
-  const result = await conn.query(`SELECT _id, * FROM ${prefix}${name} LIMIT 1000`);
+  // Get total count first
+  if (!append) {
+    try {
+      const countResult = await conn.query(`SELECT count(*) AS cnt FROM ${prefix}${name}`);
+      const arr = countResult.toArray();
+      _totalRows = arr.length > 0 ? Number(arr[0][0]) : 0;
+    } catch(e) {
+      _totalRows = 0;
+    }
+  }
+
+  // Load page
+  const result = await conn.query(`SELECT _id, * FROM ${prefix}${name} ORDER BY _id LIMIT ${PAGE_SIZE} OFFSET ${_pageOffset}`);
   const allCols = result.schema.fields.map(f => f.name);
-  const columns = allCols.filter(c => c !== '_id'); // display columns (exclude _id)
-  _ids = []; // store _id values for write-back
-  const data = result.toArray().map(row => {
+  _columns = allCols.filter(c => c !== '_id');
+  _ids = append ? _ids : [];
+
+  const newData = result.toArray().map(row => {
     const obj = {};
     allCols.forEach((col, i) => {
       if (col === '_id') {
@@ -221,20 +254,51 @@ async function loadTable(name) {
     return obj;
   });
 
-  renderGrid(columns, data);
-  setStatus(`${name}: ${data.length} rows loaded`);
+  if (append) {
+    _data = [..._data, ...newData];
+  } else {
+    _data = newData;
+  }
 
-  // Update table list
+  _pageOffset += newData.length;
+
+  renderGrid(_columns, _data, append);
+  const loaded = (_data || []).length || 0;
+  const total = _totalRows || 0;
+  setStatus(`${name}: ${loaded.toLocaleString()} / ${total.toLocaleString()} rows`);
   await loadTableList();
+}
+
+async function loadMore() {
+  if (_data.length >= _totalRows) return;
+  await loadTable(currentTable, true);
 }
 
 let _ids = []; // current _id values for write-back
 
 // ── Render Handsontable grid ──
-function renderGrid(columns, data) {
+function renderGrid(columns, data, append = false) {
   const container = document.getElementById('grid-container');
-  container.innerHTML = '';
+  
+  if (!append || !hot) {
+    container.innerHTML = '';
+    _render(container, columns, data);
+  } else {
+    hot.updateSettings({ data: data });
+  }
+  
+  // Show/hide load more bar
+  const bar = document.getElementById('load-more-bar');
+  const btn = document.getElementById('load-more-btn');
+  if (_data.length < _totalRows) {
+    bar.style.display = 'block';
+    btn.textContent = `Load more... (${(_totalRows - _data.length).toLocaleString()} remaining)`;
+  } else {
+    bar.style.display = 'none';
+  }
+}
 
+function _render(container, columns, data) {
   const displayColumns = columns.filter(c => c !== '_id');
 
   hot = new Handsontable(container, {
@@ -501,10 +565,51 @@ function executeFormula() {
 
 // ── UI Helpers ──
 function switchTab(tab) {
-  document.querySelectorAll('#sidebar-tabs button').forEach(b => b.classList.remove('active'));
-  document.querySelector(`#sidebar-tabs button:nth-child(${tab==='ai'?1:2})`).classList.add('active');
+  const tabs = document.querySelectorAll('#sidebar-tabs button');
+  tabs.forEach(b => b.classList.remove('active'));
+  const idx = tab === 'ai' ? 0 : tab === 'tables' ? 1 : 2;
+  tabs[idx].classList.add('active');
   document.getElementById('ai-panel').style.display = tab === 'ai' ? 'flex' : 'none';
   document.getElementById('table-list').style.display = tab === 'tables' ? 'block' : 'none';
+  document.getElementById('stats-panel').style.display = tab === 'stats' ? 'block' : 'none';
+  if (tab === 'stats') loadStats();
+}
+
+// ── Column Stats ──
+async function loadStats() {
+  const el = document.getElementById('stats-content');
+  if (!currentTable) { el.textContent = 'No table loaded'; return; }
+  el.innerHTML = 'Loading stats...';
+  
+  const prefix = quackConnected ? 'remote.' : '';
+  try {
+    // Get column info
+    const desc = await conn.query(`DESCRIBE ${prefix}${currentTable}`);
+    const types = {};
+    desc.toArray().forEach(r => { if (r[0] !== '_id') types[r[0]] = r[1]; });
+    
+    // Get stats per numeric column
+    let html = `<div style="color:#f0c040;margin-bottom:8px;">📈 ${currentTable}</div>`;
+    html += `<div style="color:#888;margin-bottom:12px;">${_totalRows.toLocaleString()} rows, ${Object.keys(types).length} columns</div>`;
+    
+    for (const [col, dtype] of Object.entries(types)) {
+      html += `<div style="margin-bottom:10px;padding:8px;background:#1a1a1a;border-radius:4px;">`;
+      html += `<div style="font-weight:600;">${col}</div>`;
+      html += `<div style="color:#888;font-size:11px;">${dtype}</div>`;
+      
+      if (dtype && dtype.match(/INT|BIGINT|FLOAT|DOUBLE|DECIMAL|NUMERIC|REAL/i)) {
+        try {
+          const stats = await conn.query(`SELECT min("${col}"), max("${col}"), avg("${col}")::INTEGER, count("${col}") FROM ${prefix}${currentTable}`);
+          const s = stats.toArray()[0];
+          html += `<div style="color:#7ec87e;font-size:11px;margin-top:4px;">Min: ${Number(s[0]).toLocaleString()} | Max: ${Number(s[1]).toLocaleString()} | Avg: ${Number(s[2]).toLocaleString()}</div>`;
+        } catch(e) {}
+      }
+      html += `</div>`;
+    }
+    el.innerHTML = html;
+  } catch(e) {
+    el.innerHTML = `Stats unavailable: ${e.message}`;
+  }
 }
 
 function setStatus(msg) {
@@ -523,6 +628,7 @@ window.deleteSelectedRows = deleteSelectedRows;
 window.executeFormula = executeFormula;
 window.importCSV = importCSV;
 window.exportCSV = exportCSV;
+window.loadMore = loadMore;
 window.currentTable = currentTable;
 
 // ── Boot ──
