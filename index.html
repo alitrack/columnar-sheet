@@ -301,6 +301,12 @@ async function loadTable(name, append = false) {
   const result = await conn.query(`SELECT * FROM ${prefix}${name} ORDER BY _id LIMIT ${PAGE_SIZE} OFFSET ${_pageOffset}`);
   const { colData, idData, colNames } = arrowToColumnar(result);
   console.log(`[CS] Data loaded: ${colNames.length} cols, ${idData.length} rows, cols=[${colNames.join(',')}]`);
+  // Dump first 3 rows
+  for (let ri = 0; ri < Math.min(3, idData.length); ri++) {
+    const row = {};
+    for (const cn of colNames) row[cn] = colData[cn]?.[ri];
+    console.log(`[CS]   row[${ri}]:`, row);
+  }
 
   _pageOffset += idData.length;
   if (append) {
@@ -308,9 +314,16 @@ async function loadTable(name, append = false) {
     grid.appendColumnarData(colData, idData);
   } else {
     _ids = idData;
-    grid.setColumns(colNames.map(n => ({ name: n, type: 'auto' })));
-    grid.setColumnarData(colData, idData);
+    // Manually set data bypassing setColumnarData
+    const visCols = colNames.filter(n => n !== '_id');
+    grid._data = colData;
+    grid._idData = idData;
+    grid._rowCount = idData.length;
+    grid.columns = colNames.map(n => ({ name: n, type: 'auto' }));
+    grid.visibleCols = visCols.map(n => ({ name: n, type: 'auto' }));
+    grid._computeColWidths();
     grid.setTotalRows(_totalRows);
+    console.log(`[CS] Grid state: _data keys=${Object.keys(grid._data)}, visCols=${visCols}, rowCount=${grid._rowCount}, prod[0]=${colData.product?.[0]}`);
   }
 
   // Detect end of data
