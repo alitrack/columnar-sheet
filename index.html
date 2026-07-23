@@ -3,44 +3,40 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ColumnarSheet — DuckDB + Quack Spreadsheet</title>
-<script src="https://cdn.jsdelivr.net/npm/handsontable@14.6.1/dist/handsontable.full.min.js"></script>
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/handsontable@14.6.1/dist/handsontable.full.min.css">
+<title>ColumnarSheet — DuckDB + Quack Canvas Grid</title>
+<script src="canvas-grid.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e0e0e0; }
   #app { display: flex; flex-direction: column; height: 100vh; }
-  #toolbar { display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #1a1a1a; border-bottom: 1px solid #333; }
-  #toolbar h1 { font-size: 18px; color: #f0c040; margin-right: 24px; }
-  #toolbar button { padding: 6px 16px; border: 1px solid #444; background: #2a2a2a; color: #ccc; border-radius: 4px; cursor: pointer; font-size: 13px; }
+  #toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #1a1a1a; border-bottom: 1px solid #333; min-height: 40px; }
+  #toolbar h1 { font-size: 17px; color: #f0c040; margin-right: 20px; }
+  #toolbar button { padding: 5px 14px; border: 1px solid #444; background: #2a2a2a; color: #ccc; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap; }
   #toolbar button:hover { background: #3a3a3a; }
   #toolbar button.connected { border-color: #4caf50; color: #4caf50; }
   #toolbar button.disconnected { border-color: #f44336; color: #f44336; }
-  #status { font-size: 12px; color: #888; flex: 1; text-align: right; }
+  #status { font-size: 11px; color: #888; flex: 1; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   #content { display: flex; flex: 1; overflow: hidden; }
-  #grid-container { flex: 1; overflow: hidden; }
+  #grid-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  #grid-container { flex: 1; overflow: hidden; position: relative; }
   #sidebar { width: 340px; background: #141414; border-left: 1px solid #333; display: flex; flex-direction: column; }
   #sidebar-tabs { display: flex; border-bottom: 1px solid #333; }
-  #sidebar-tabs button { flex: 1; padding: 10px; background: none; border: none; color: #888; cursor: pointer; font-size: 13px; }
+  #sidebar-tabs button { flex: 1; padding: 9px; background: none; border: none; color: #888; cursor: pointer; font-size: 13px; }
   #sidebar-tabs button.active { color: #f0c040; border-bottom: 2px solid #f0c040; }
   #ai-panel { flex: 1; display: flex; flex-direction: column; padding: 12px; overflow: hidden; }
-  #ai-messages { flex: 1; overflow-y: auto; font-size: 13px; margin-bottom: 12px; }
-  #ai-messages .msg { margin-bottom: 8px; padding: 8px; border-radius: 6px; }
+  #ai-messages { flex: 1; overflow-y: auto; font-size: 13px; margin-bottom: 10px; }
+  #ai-messages .msg { margin-bottom: 8px; padding: 8px; border-radius: 6px; word-break: break-word; }
   #ai-messages .msg.user { background: #1e3a5f; margin-left: 24px; }
   #ai-messages .msg.assistant { background: #1a2a1a; margin-right: 24px; }
-  #ai-messages .msg.sql { font-family: monospace; background: #0d0d0d; padding: 8px; border-radius: 4px; margin: 4px 0; font-size: 12px; color: #7ec87e; }
+  #ai-messages .msg.sql { font-family: monospace; background: #0d0d0d; padding: 8px; border-radius: 4px; margin: 4px 0; font-size: 12px; color: #7ec87e; white-space: pre-wrap; }
   #ai-input-area { display: flex; gap: 8px; }
   #ai-input { flex: 1; padding: 8px; background: #1a1a1a; border: 1px solid #333; border-radius: 4px; color: #e0e0e0; font-size: 13px; }
   #ai-send { padding: 8px 16px; background: #f0c040; color: #0f0f0f; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
-  #table-list { padding: 12px; font-size: 13px; }
+  #table-list { padding: 12px; font-size: 13px; overflow-y: auto; }
   #table-list .table-item { padding: 6px 8px; cursor: pointer; border-radius: 4px; }
   #table-list .table-item:hover { background: #2a2a2a; }
   #table-list .table-item.selected { background: #1e3a5f; }
-  .handsontable { color: #e0e0e0 !important; }
-  .handsontable th { background: #1a1a1a !important; color: #888 !important; }
-  .handsontable td { background: #0f0f0f !important; color: #e0e0e0 !important; border-color: #222 !important; }
-  .handsontable tr:hover td { background: #1a1a1a !important; }
-  .htDimmed { color: #444 !important; }
+  #stats-panel { padding: 12px; overflow-y: auto; font-size: 13px; }
 </style>
 </head>
 <body>
@@ -48,20 +44,20 @@
   <div id="toolbar">
     <h1>🦆 ColumnarSheet</h1>
     <button id="btn-quack" class="disconnected" onclick="connectQuack()">Quack: OFF</button>
-    <button onclick="addRow()" title="Add row (Ctrl+Enter)">＋ Row</button>
+    <button onclick="addRow()" title="Add row">＋ Row</button>
     <button onclick="deleteSelectedRows()" title="Delete selected rows">🗑 Del</button>
     <button id="btn-refresh" onclick="loadTable(currentTable)">⟳</button>
-    <button onclick="document.getElementById('csv-upload').click()" title="Import CSV">📥 CSV</button>
-    <button onclick="exportCSV()" title="Export to CSV">📤 CSV</button>
+    <button onclick="document.getElementById('csv-upload').click()">📥 CSV</button>
+    <button onclick="exportCSV()">📤 CSV</button>
     <input id="csv-upload" type="file" accept=".csv" style="display:none" onchange="importCSV(event)">
-    <input id="formula-bar" placeholder="Click a cell to see its value, or type SQL..." 
+    <input id="formula-bar" placeholder="Click a cell to see value, or type SQL..."
            style="flex:1;padding:5px 12px;background:#0d0d0d;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-family:monospace;font-size:13px;"
            onkeydown="if(event.key==='Enter'){executeFormula();event.preventDefault()}">
-    <span id="status" style="min-width:200px">Ready</span>
+    <span id="status">Ready</span>
   </div>
   <div id="content">
-    <div id="grid-area" style="flex:1;display:flex;flex-direction:column;overflow:hidden;">
-      <div id="grid-container" style="flex:1;overflow:hidden;"></div>
+    <div id="grid-area">
+      <div id="grid-container"></div>
       <div id="load-more-bar" style="display:none;padding:8px;text-align:center;background:#1a1a1a;border-top:1px solid #333;">
         <button id="load-more-btn" onclick="loadMore()" style="padding:6px 24px;background:#2a2a2a;color:#ccc;border:1px solid #444;border-radius:4px;cursor:pointer;font-size:13px;">
           Load more rows...
@@ -76,27 +72,27 @@
       </div>
       <div id="ai-panel">
         <div id="ai-messages">
-          <div class="msg assistant">Configure AI backend with ⚙️ button, then ask me about your data.</div>
+          <div class="msg assistant">AI ready. Use ⚙️ to configure backend, then ask about your data.</div>
         </div>
         <div id="ai-input-area">
-          <input id="ai-input" placeholder="e.g. Show top 3 products by revenue..." onkeydown="if(event.key==='Enter')askAI()">
+          <input id="ai-input" placeholder="e.g. top 5 categories by revenue..." onkeydown="if(event.key==='Enter')askAI()">
           <button id="ai-send" onclick="askAI()">Send</button>
           <button id="ai-settings-btn" onclick="toggleAISettings()" style="background:#2a2a2a;color:#888;border:1px solid #333;border-radius:4px;cursor:pointer;padding:8px 10px;font-size:16px;">⚙️</button>
         </div>
         <div id="ai-settings" style="display:none;padding:8px;margin-top:8px;background:#0d0d0d;border-radius:4px;">
           <select id="ai-backend" onchange="onAIBackendChange()" style="width:100%;padding:6px;background:#1a1a1a;color:#e0e0e0;border:1px solid #333;border-radius:4px;margin-bottom:6px;">
             <option value="moonbridge" selected>🌉 MoonBridge (DeepSeek)</option>
-            <option value="local" data-keyless="true">🖥️ Local (Ollama)</option>
+            <option value="local">🖥️ Local (Ollama)</option>
             <option value="xai">✖️ xAI (Grok)</option>
             <option value="openai">🧠 OpenAI</option>
           </select>
-          <input id="ai-api-key" type="password" placeholder="API Key (local = skip)" style="width:100%;padding:6px;background:#1a1a1a;color:#e0e0e0;border:1px solid #333;border-radius:4px;margin-bottom:6px;">
+          <input id="ai-api-key" type="password" placeholder="API Key (moonbridge/local = skip)" style="width:100%;padding:6px;background:#1a1a1a;color:#e0e0e0;border:1px solid #333;border-radius:4px;margin-bottom:6px;">
           <input id="ai-endpoint" placeholder="Endpoint URL (default auto)" style="width:100%;padding:6px;background:#1a1a1a;color:#e0e0e0;border:1px solid #333;border-radius:4px;margin-bottom:6px;">
           <input id="ai-model" placeholder="Model name (default auto)" style="width:100%;padding:6px;background:#1a1a1a;color:#e0e0e0;border:1px solid #333;border-radius:4px;">
         </div>
       </div>
       <div id="table-list" style="display:none"></div>
-      <div id="stats-panel" style="display:none;padding:12px;overflow-y:auto;font-size:13px;">
+      <div id="stats-panel" style="display:none">
         <div id="stats-content">Click a table to load stats</div>
       </div>
     </div>
@@ -107,12 +103,17 @@
 import * as duckdb from 'https://cdn.jsdelivr.net/npm/@duckdb/duckdb-wasm/+esm';
 
 // ── Globals ──
-let db, conn, hot;
+let db, conn, grid;
 let currentTable = 'sales';
 let quackConnected = false;
 const QUACK_SERVER = 'localhost';
 const QUACK_PORT = '9494';
 const QUACK_TOKEN = 'columnar-sheet-token-2026';
+const PAGE_SIZE = 500;
+
+let _pageOffset = 0;
+let _totalRows = 0;
+let _ids = [];
 
 // ── Init DuckDB-Wasm ──
 async function initDuckDB() {
@@ -120,7 +121,6 @@ async function initDuckDB() {
   const JSDELIVR_BUNDLES = duckdb.getJsDelivrBundles();
   const bundle = await duckdb.selectBundle(JSDELIVR_BUNDLES);
 
-  // CORS-safe worker instantiation
   const worker_url = URL.createObjectURL(
     new Blob([`importScripts("${bundle.mainWorker}");`], {type: 'text/javascript'})
   );
@@ -134,6 +134,27 @@ async function initDuckDB() {
   setStatus('DuckDB-Wasm ready');
 }
 
+// ── Convert DuckDB Arrow result to columnar format ──
+function arrowToColumnar(result) {
+  const colNames = result.schema.fields.map(f => f.name);
+  const rows = result.toArray();
+  const colData = {};
+  const idData = [];
+
+  for (const name of colNames) {
+    colData[name] = [];
+  }
+
+  for (const row of rows) {
+    colNames.forEach((name, i) => {
+      colData[name].push(row[i]);
+    });
+    if (colData._id) idData.push(colData._id[colData._id.length - 1]);
+  }
+
+  return { colData, idData: colData._id || idData, colNames };
+}
+
 // ── Quack Connection ──
 async function connectQuack() {
   const btn = document.getElementById('btn-quack');
@@ -141,10 +162,8 @@ async function connectQuack() {
 
   setStatus('Connecting to Quack server...');
   try {
-    // Try loading Quack extension in WASM
     await conn.query(`INSTALL quack`);
     await conn.query(`LOAD quack`);
-    // Create secret and attach
     await conn.query(`CREATE SECRET (TYPE quack, TOKEN '${QUACK_TOKEN}', SCOPE 'quack:${QUACK_SERVER}:${QUACK_PORT}')`);
     await conn.query(`ATTACH 'quack:${QUACK_SERVER}:${QUACK_PORT}' AS remote`);
 
@@ -153,46 +172,39 @@ async function connectQuack() {
     btn.className = 'connected';
     setStatus('Quack connected');
 
-    // Load tables
     await loadTableList();
     await loadTable('sales');
   } catch (e) {
-    console.error('Quack connection failed:', e);
-    setStatus(`Quack failed: ${e.message.substring(0, 60)}...`);
-    // Fallback: load local sample data
+    console.error('Quack failed:', e);
+    setStatus(`Quack failed: ${e.message.substring(0, 60)}`);
     await loadLocalFallback();
   }
 }
 
-// ── Fallback: local DuckDB-Wasm only ──
 async function loadLocalFallback() {
-  setStatus('Quack unavailable — using local mode');
+  setStatus('Quack unavailable — local mode');
   document.getElementById('btn-quack').className = 'disconnected';
   document.getElementById('btn-quack').textContent = 'Quack: Local';
-
-  // Load CSV from the HTTP server into DuckDB-Wasm's virtual filesystem
   try {
     const csvResp = await fetch('sample_data/sales.csv');
     const csvText = await csvResp.text();
     await db.registerFileText('sales.csv', csvText);
     await conn.query(`CREATE TABLE sales AS SELECT * FROM read_csv_auto('sales.csv', header=true)`);
   } catch(e) {
-    console.error('Local data load failed:', e);
     setStatus('Local data load failed');
     return;
   }
   currentTable = 'sales';
   await loadTable('sales');
-  setStatus('Local mode ready — 10 rows loaded');
+  setStatus('Local mode ready');
 }
 
-// ── Load table list ──
+// ── Table List ──
 async function loadTableList() {
   const container = document.getElementById('table-list');
   try {
     let tables;
     if (quackConnected) {
-      // Quack: use query() to run SHOW TABLES on remote server
       const result = await conn.query(`FROM remote.query('SHOW TABLES')`);
       tables = result.toArray().map(r => r[0]);
     } else {
@@ -203,172 +215,208 @@ async function loadTableList() {
       `<div class="table-item ${t===currentTable?'selected':''}" onclick="loadTable('${t}')">📊 ${t}</div>`
     ).join('');
   } catch(e) {
-    console.warn('loadTableList failed:', e);
-    container.innerHTML = `<div style="color:#888;padding:12px;">No tables loaded</div>`;
+    container.innerHTML = `<div style="color:#888;padding:12px;">No tables</div>`;
   }
 }
 
-// ── Load table data into grid ──
-const PAGE_SIZE = 500;
-let _pageOffset = 0;
-let _totalRows = 0;
-let _columns = [];
-let _data = [];
-
+// ── Load Table → Canvas Grid ──
 async function loadTable(name, append = false) {
   currentTable = name;
-  if (!append) {
-    _pageOffset = 0;
-    _data = [];
-  }
-  setStatus(`Loading ${name} (offset ${append ? _pageOffset : 0})...`);
+  if (!append) { _pageOffset = 0; _ids = []; }
+  setStatus(`Loading ${name}...`);
 
   const prefix = quackConnected ? 'remote.' : '';
 
-  // Get total count first
+  // Get total count
   if (!append) {
     try {
       if (quackConnected) {
-        // Quack: count via remote.query — may return empty [], handle gracefully
         const cr = await conn.query(`FROM ${prefix}query('SELECT count(*) AS cnt FROM ${currentTable}')`);
         const rows = cr.toArray();
-        if (rows.length > 0 && rows[0].length > 0 && rows[0][0] != null) {
-          _totalRows = Number(rows[0][0]);
-        } else {
-          // Quack returned empty — fall back to data-driven estimation
-          _totalRows = 0; // will be set later
-        }
+        _totalRows = (rows.length > 0 && rows[0][0] != null) ? Number(rows[0][0]) : 0;
       } else {
         const cr = await conn.query(`SELECT count(*)::BIGINT AS cnt FROM ${currentTable}`);
         _totalRows = Number(cr.toArray()[0][0]);
       }
-    } catch(e) {
-      console.warn('Count query failed:', e.message);
-      _totalRows = 0;
-    }
+    } catch(e) { _totalRows = 0; }
   }
 
   // Load page
   const result = await conn.query(`SELECT _id, * FROM ${prefix}${name} ORDER BY _id LIMIT ${PAGE_SIZE} OFFSET ${_pageOffset}`);
-  const allCols = result.schema.fields.map(f => f.name);
-  _columns = allCols.filter(c => c !== '_id');
-  _ids = append ? _ids : [];
+  const { colData, idData, colNames } = arrowToColumnar(result);
 
-  const newData = result.toArray().map(row => {
-    const obj = {};
-    allCols.forEach((col, i) => {
-      if (col === '_id') {
-        obj._id = row[i];
-        _ids.push(row[i]);
-      } else {
-        obj[col] = row[i];
-      }
-    });
-    return obj;
-  });
-
+  _pageOffset += idData.length;
   if (append) {
-    _data = [..._data, ...newData];
+    _ids.push(...idData);
+    grid.appendColumnarData(colData, idData);
   } else {
-    _data = newData;
+    _ids = idData;
+    grid.setColumns(colNames.map(n => ({ name: n, type: 'auto' })));
+    grid.setColumnarData(colData, idData);
+    grid.setTotalRows(_totalRows);
   }
 
-  _pageOffset += newData.length;
-
-  // If count was unknown and we got fewer than PAGE_SIZE, we've loaded all
-  if (_totalRows === 0 && newData.length < PAGE_SIZE) {
-    _totalRows = _data.length;
+  // Detect end of data
+  if (_totalRows === 0 && idData.length < PAGE_SIZE) {
+    _totalRows = grid.rowCount;
+    grid.setTotalRows(_totalRows);
   }
 
-  renderGrid(_columns, _data, append);
-  const loaded = (_data || []).length || 0;
+  grid.render();
+  updateLoadMoreBar();
+  const loaded = grid.rowCount;
   const total = _totalRows || '?';
   setStatus(`${name}: ${loaded.toLocaleString()} / ${typeof total === 'number' ? total.toLocaleString() : '?'} rows`);
   await loadTableList();
 }
 
-async function loadMore() {
-  // _totalRows === 0 means unknown count — keep loading until we hit end
-  if (_totalRows > 0 && _data.length >= _totalRows) return;
-  await loadTable(currentTable, true);
+function loadMore() {
+  if (_totalRows > 0 && grid.rowCount >= _totalRows) return;
+  loadTable(currentTable, true);
 }
 
-let _ids = []; // current _id values for write-back
-
-// ── Render Handsontable grid ──
-function renderGrid(columns, data, append = false) {
-  const container = document.getElementById('grid-container');
-  
-  if (!append || !hot) {
-    container.innerHTML = '';
-    _render(container, columns, data);
-  } else {
-    hot.updateSettings({ data: data });
-  }
-  
-  // Show/hide load more bar
+function updateLoadMoreBar() {
   const bar = document.getElementById('load-more-bar');
   const btn = document.getElementById('load-more-btn');
-  const hasMore = _totalRows === 0 || _data.length < _totalRows;
+  const loaded = grid.rowCount;
+  const hasMore = _totalRows === 0 || loaded < _totalRows;
+  bar.style.display = hasMore ? 'block' : 'none';
   if (hasMore) {
-    bar.style.display = 'block';
-    const remaining = _totalRows > 0 ? ` (${(_totalRows - _data.length).toLocaleString()} remaining)` : '';
+    const remaining = _totalRows > 0 ? ` (${(_totalRows - loaded).toLocaleString()} remaining)` : '';
     btn.textContent = `Load more...${remaining}`;
-  } else {
-    bar.style.display = 'none';
   }
 }
 
-function _render(container, columns, data) {
-  const displayColumns = columns.filter(c => c !== '_id');
+// ── Cell Edit → Quack Write-back ──
+function onCellChange(row, colIndex, oldVal, newVal) {
+  const idVal = _ids[row];
+  const colName = grid.visibleCols[colIndex]?.name;
+  if (!idVal || !colName) return;
 
-  hot = new Handsontable(container, {
-    data: data,
-    columns: columns.map(c => {
-      if (c === '_id') return { data: c, width: 0 };
-      return { data: c, title: c };
-    }),
-    rowHeaders: true,
-    colHeaders: displayColumns,
-    licenseKey: 'non-commercial-and-evaluation',
-    height: '100%',
-    width: '100%',
-    stretchH: 'all',
-    contextMenu: true,
-    filters: true,
-    dropdownMenu: true,
-    multiColumnSorting: true,
-    manualColumnResize: true,
-    afterChange: async (changes, source) => {
-      if (source === 'loadData') return;
-      if (!changes) return;
-      for (const [row, col, oldVal, newVal] of changes) {
-        if (oldVal === newVal) continue;
-        const idVal = _ids[row];
-        const colName = columns[hot.propToCol(col)];
-        if (!idVal || !colName || colName === '_id') continue;
+  const safeVal = newVal == null || newVal === '' ? 'NULL' : `'${String(newVal).replace(/'/g, "''")}'`;
+  const prefix = quackConnected ? 'remote.' : '';
+  const updateInner = `UPDATE ${currentTable} SET "${colName}" = ${safeVal} WHERE _id = ${idVal}`;
+  const sql = quackConnected
+    ? `FROM ${prefix}query('${updateInner.replace(/'/g, "''")}')`
+    : updateInner;
 
-        const safeVal = newVal == null ? 'NULL' : `'${String(newVal).replace(/'/g, "''")}'`;
-        const prefix = quackConnected ? 'remote.' : '';
-        const updateInner = `UPDATE ${currentTable} SET "${colName}" = ${safeVal} WHERE _id = ${idVal}`;
-        const sql = quackConnected
-          ? `FROM ${prefix}query('${updateInner.replace(/'/g, "''")}')`
-          : updateInner;
-
-        try {
-          await conn.query(sql);
-          setStatus(`✅ Updated ${currentTable}."${colName}" [id=${idVal}]`);
-        } catch(e) {
-          setStatus(`❌ Write failed: ${e.message.substring(0, 50)}`);
-          console.error('Write-back error:', e);
-        }
-      }
-    },
-    afterSelection: (r, c) => {
-      const val = hot.getDataAtCell(r, c);
-      document.getElementById('formula-bar').value = val ?? '';
-    }
+  conn.query(sql).then(() => {
+    setStatus(`✅ Updated ${currentTable}."${colName}" [id=${idVal}]`);
+  }).catch(e => {
+    setStatus(`❌ Write failed: ${e.message.substring(0, 50)}`);
   });
+}
+
+function onSelectionChange(sel) {
+  if (sel) {
+    const val = grid.getCell(sel.startRow, sel.startCol);
+    document.getElementById('formula-bar').value = val ?? '';
+  }
+}
+
+// ── Row Operations ──
+async function addRow() {
+  const displayCols = grid.visibleCols.map(c => c.name);
+  if (!displayCols.length) return;
+
+  const prefix = quackConnected ? 'remote.' : '';
+  const colList = '"_id", ' + displayCols.map(c => `"${c}"`).join(', ');
+  const nextIdExpr = `(SELECT COALESCE(MAX(_id), 0) + 1 FROM ${currentTable})`;
+  const valList = `${nextIdExpr}, ` + displayCols.map(() => 'NULL').join(', ');
+  const insertInner = `INSERT INTO ${currentTable} (${colList}) VALUES (${valList})`;
+  const insertSql = quackConnected
+    ? `FROM ${prefix}query('${insertInner.replace(/'/g, "''")}')`
+    : insertInner;
+
+  try {
+    await conn.query(insertSql);
+    setStatus(`✅ New row added`);
+    await loadTable(currentTable);
+    grid.scrollToRow(grid.rowCount - 1);
+  } catch(e) {
+    setStatus(`❌ Insert failed: ${e.message.substring(0, 50)}`);
+  }
+}
+
+async function deleteSelectedRows() {
+  const ids = grid.getSelectedIds();
+  if (!ids.size) { setStatus('Select rows first'); return; }
+
+  const prefix = quackConnected ? 'remote.' : '';
+  for (const id of ids) {
+    try {
+      const delInner = `DELETE FROM ${currentTable} WHERE _id = ${id}`;
+      const sql = quackConnected
+        ? `FROM ${prefix}query('${delInner.replace(/'/g, "''")}')`
+        : delInner;
+      await conn.query(sql);
+    } catch(e) {
+      setStatus(`❌ Delete id=${id} failed`);
+      return;
+    }
+  }
+  setStatus(`✅ Deleted ${ids.size} row(s)`);
+  await loadTable(currentTable);
+}
+
+// ── CSV Import/Export ──
+async function importCSV(event) {
+  const file = event.target.files[0];
+  if (!file) return;
+  setStatus(`Importing ${file.name}...`);
+
+  const text = await file.text();
+  const tableName = file.name.replace(/\.csv$/i, '').replace(/[^a-zA-Z0-9_]/g, '_');
+
+  await db.registerFileText('_import.csv', text);
+  const prefix = quackConnected ? 'remote.' : '';
+
+  if (quackConnected) {
+    const createSql = `CREATE TABLE ${tableName} AS SELECT row_number() OVER () AS _id, * FROM read_csv_auto('_import.csv', header=true)`;
+    await conn.query(`FROM ${prefix}query('${createSql.replace(/'/g, "''")}')`);
+  } else {
+    await conn.query(`CREATE TABLE ${tableName} AS SELECT row_number() OVER () AS _id, * FROM read_csv_auto('_import.csv', header=true)`);
+  }
+
+  currentTable = tableName;
+  await loadTableList();
+  await loadTable(tableName);
+  setStatus(`✅ Imported ${tableName}`);
+  event.target.value = '';
+}
+
+function exportCSV() {
+  const cols = grid.visibleCols.map(c => c.name);
+  const rows = [];
+  for (let r = 0; r < grid.rowCount; r++) {
+    rows.push(cols.map(c => {
+      const v = grid.getCell(r, grid.visibleCols.findIndex(vc => vc.name === c));
+      return v === null || v === undefined ? '' : `"${String(v).replace(/"/g, '""')}"`;
+    }).join(','));
+  }
+  const csv = [cols.join(','), ...rows].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `${currentTable}.csv`; a.click();
+  URL.revokeObjectURL(url);
+  setStatus(`✅ Exported ${grid.rowCount} rows`);
+}
+
+function executeFormula() {
+  const bar = document.getElementById('formula-bar');
+  const val = bar.value.trim();
+  if (!val) return;
+  const sel = grid.getSelection();
+  if (sel) {
+    // Direct cell write (bypasses Quack — just sets grid data)
+    const colName = grid.visibleCols[sel.startCol]?.name;
+    if (colName && grid._data[colName]) {
+      grid._data[colName][sel.startRow] = val;
+      grid.render();
+      onCellChange(sel.startRow, sel.startCol, null, val);
+    }
+  }
 }
 
 // ── AI Assistant ──
@@ -379,26 +427,12 @@ function getAIConfig() {
   const model = document.getElementById('ai-model').value.trim();
 
   const defaults = {
-    moonbridge: {
-      url: endpoint || '/api/ai',
-      model: model || 'deepseek-v4-flash',
-      key: 'moonbridge'  // moon-bridge doesn't validate inbound keys
-    },
-    local:  {
-      url: endpoint || 'http://localhost:11434/v1/chat/completions',
-      model: model || 'qwen2.5:14b', key: 'ollama'
-    },
-    xai:    {
-      url: endpoint || 'https://api.x.ai/v1/chat/completions',
-      model: model || 'grok-4', key: key
-    },
-    openai: {
-      url: endpoint || 'https://api.openai.com/v1/chat/completions',
-      model: model || 'gpt-4o', key: key
-    },
+    moonbridge: { url: endpoint || '/api/ai', model: model || 'deepseek-v4-flash', key: 'moonbridge' },
+    local:      { url: endpoint || 'http://localhost:11434/v1/chat/completions', model: model || 'qwen2.5:14b', key: 'ollama' },
+    xai:        { url: endpoint || 'https://api.x.ai/v1/chat/completions', model: model || 'grok-4', key: key },
+    openai:     { url: endpoint || 'https://api.openai.com/v1/chat/completions', model: model || 'gpt-4o', key: key },
   };
-  const cfg = defaults[backend] || defaults.moonbridge;
-  return { url: cfg.url, model: cfg.model, key: cfg.key };
+  return defaults[backend] || defaults.moonbridge;
 }
 
 function toggleAISettings() {
@@ -419,25 +453,22 @@ async function askAI() {
   const question = input.value.trim();
   if (!question) return;
   input.value = '';
-
   addMessage('user', question);
 
-  // Get schema using DESCRIBE (works for both local and remote)
+  // Get schema
   let schemaInfo;
   try {
     const prefix = quackConnected ? 'remote.' : '';
     const r = await conn.query(`DESCRIBE ${prefix}${currentTable}`);
     schemaInfo = r.toArray().map(r => `${r[0]} (${r[1]})`).join(', ');
-  } catch(e) {
-    schemaInfo = '(schema unavailable)';
-  }
+  } catch(e) { schemaInfo = '(schema unavailable)'; }
 
-  // Build a rich prompt with schema and examples
   const tableRef = quackConnected ? `remote.${currentTable}` : currentTable;
   let schemaLines = [`Table: ${tableRef}`, `Columns: ${schemaInfo}`];
 
-  // Add sample data for context (first 3 rows)
+  // Sample data
   try {
+    const prefix = quackConnected ? 'remote.' : '';
     const sample = await conn.query(`SELECT * FROM ${prefix}${currentTable} LIMIT 3`);
     const sampleRows = sample.toArray();
     if (sampleRows.length > 0) {
@@ -460,7 +491,6 @@ Rules:
 - Return ONLY the SQL, no explanation, no markdown fences
 - Use proper quoting for column names (double quotes)
 - Prefer simple, readable SQL over complex CTEs
-- Use DuckDB functions where helpful (e.g., strftime, regexp_matches)
 - NEVER use DELETE, UPDATE, INSERT, or DROP — SELECT only`;
 
   addMessage('assistant', '🤔 Generating SQL...');
@@ -483,22 +513,25 @@ Rules:
     const aiData = await aiResp.json();
     let sql = aiData.choices[0].message.content.trim();
     sql = sql.replace(/```sql\n?/g, '').replace(/```/g, '').trim();
-
     addMessage('assistant', `<div class="sql">${sql}</div>`);
 
-    // Execute SQL — AI already uses remote.sales as table reference when Quack is connected
-    const execSql = quackConnected ? sql : sql.replace(new RegExp(`\\b${currentTable}\\b`, 'g'), `${currentTable}`);
+    // Execute SQL
+    const execSql = quackConnected ? sql : sql.replace(new RegExp(`\\b${currentTable}\\b`, 'g'), currentTable);
     const execResult = await conn.query(execSql);
-    const cols = execResult.schema.fields.map(f => f.name);
-    const rows = execResult.toArray().map(row => {
-      const obj = {};
-      cols.forEach((c, i) => obj[c] = row[i]);
-      return obj;
-    });
 
-    renderGrid(cols, rows);
-    addMessage('assistant', `✅ ${rows.length} rows returned`);
-    setStatus(`Query done: ${rows.length} rows`);
+    // Convert result to columnar and render
+    const { colData, idData, colNames } = arrowToColumnar(execResult);
+    _ids = idData;
+    _totalRows = idData.length;
+
+    grid.setColumns(colNames.map(n => ({ name: n, type: 'auto' })));
+    grid.setColumnarData(colData, idData);
+    grid.setTotalRows(_totalRows);
+    grid.render();
+    updateLoadMoreBar();
+
+    addMessage('assistant', `✅ ${idData.length} rows`);
+    setStatus(`Query done: ${idData.length} rows`);
   } catch (e) {
     addMessage('assistant', `❌ ${e.message}`);
   }
@@ -513,174 +546,65 @@ function addMessage(role, text) {
   container.scrollTop = container.scrollHeight;
 }
 
-// ── Row Operations ──
-async function addRow() {
-  // Get current columns from the grid to build INSERT
-  const displayCols = hot.getColHeader().filter(c => c !== '_id');
-  if (!displayCols.length) return;
+// ── Column Stats ──
+async function loadStats() {
+  const el = document.getElementById('stats-content');
+  if (!currentTable) { el.textContent = 'No table loaded'; return; }
+  el.innerHTML = 'Loading stats...';
 
-  // Build INSERT with auto-increment _id
   const prefix = quackConnected ? 'remote.' : '';
-  const colList = '"_id", ' + displayCols.map(c => `"${c}"`).join(', ');
-  const nextIdExpr = `(SELECT COALESCE(MAX(_id), 0) + 1 FROM ${currentTable})`;
-  const valList = `${nextIdExpr}, ` + displayCols.map(() => 'NULL').join(', ');
-  const insertInner = `INSERT INTO ${currentTable} (${colList}) VALUES (${valList})`;
-  const insertSql = quackConnected
-    ? `FROM ${prefix}query('${insertInner.replace(/'/g, "''")}')`
-    : insertInner;
-
   try {
-    await conn.query(insertSql);
-    setStatus(`✅ New row added to ${currentTable}`);
-    await loadTable(currentTable);
-    // Scroll to bottom
-    hot.scrollViewportTo(hot.countRows() - 1, 0);
-  } catch(e) {
-    setStatus(`❌ Insert failed: ${e.message.substring(0, 50)}`);
-  }
-}
+    const desc = await conn.query(`DESCRIBE ${prefix}${currentTable}`);
+    const types = {};
+    desc.toArray().forEach(r => { if (r[0] !== '_id') types[r[0]] = r[1]; });
 
-async function deleteSelectedRows() {
-  const selected = hot.getSelected();
-  if (!selected || !selected.length) {
-    setStatus('Select rows first');
-    return;
-  }
+    const totalStr = _totalRows > 0 ? _totalRows.toLocaleString() : grid.rowCount.toLocaleString();
+    let html = `<div style="color:#f0c040;margin-bottom:8px;">📈 ${currentTable}</div>`;
+    html += `<div style="color:#888;margin-bottom:12px;">~${totalStr} rows, ${Object.keys(types).length} cols</div>`;
 
-  const rowsToDelete = new Set();
-  for (const [r1, , r2] of selected) {
-    for (let r = Math.min(r1, r2); r <= Math.max(r1, r2); r++) {
-      rowsToDelete.add(_ids[r]);
+    for (const [col, dtype] of Object.entries(types)) {
+      html += `<div style="margin-bottom:10px;padding:8px;background:#1a1a1a;border-radius:4px;">`;
+      html += `<div style="font-weight:600;">${col}</div><div style="color:#888;font-size:11px;">${dtype}</div>`;
+      if (dtype && dtype.match(/INT|BIGINT|FLOAT|DOUBLE|DECIMAL|NUMERIC|REAL/i)) {
+        try {
+          const stats = await conn.query(`SELECT min("${col}"), max("${col}"), avg("${col}")::INTEGER FROM ${prefix}${currentTable}`);
+          const rows = stats.toArray();
+          if (rows.length > 0 && rows[0].length >= 3) {
+            const s = rows[0];
+            html += `<div style="color:#7ec87e;font-size:11px;margin-top:4px;">Min: ${Number(s[0]).toLocaleString()} | Max: ${Number(s[1]).toLocaleString()} | Avg: ${Number(s[2]).toLocaleString()}</div>`;
+          }
+        } catch(e) {}
+      }
+      html += `</div>`;
     }
-  }
-
-  if (!rowsToDelete.size) { setStatus('No rows selected'); return; }
-
-  const prefix = quackConnected ? 'remote.' : '';
-  for (const id of rowsToDelete) {
-    try {
-      const delSql = quackConnected
-        ? `FROM ${prefix}query('DELETE FROM ${currentTable} WHERE _id = ${id}')`
-        : `DELETE FROM ${currentTable} WHERE _id = ${id}`;
-      await conn.query(delSql);
-    } catch(e) {
-      setStatus(`❌ Delete id=${id} failed: ${e.message.substring(0, 40)}`);
-      return;
-    }
-  }
-  setStatus(`✅ Deleted ${rowsToDelete.size} row(s)`);
-  await loadTable(currentTable);
+    el.innerHTML = html;
+  } catch(e) { el.innerHTML = `Stats unavailable: ${e.message}`; }
 }
 
-// ── CSV Import/Export ──
-async function importCSV(event) {
-  const file = event.target.files[0];
-  if (!file) return;
-  setStatus(`Importing ${file.name}...`);
-
-  const text = await file.text();
-  const tableName = file.name.replace(/\.csv$/i, '').replace(/[^a-zA-Z0-9_]/g, '_');
-
-  // Register file in DuckDB-Wasm virtual FS and create table
-  await db.registerFileText('_import.csv', text);
-  const prefix = quackConnected ? 'remote.' : '';
-
-  if (quackConnected) {
-    // Import to remote via query
-    const createSql = `CREATE TABLE ${tableName} AS SELECT row_number() OVER () AS _id, * FROM read_csv_auto('_import.csv', header=true)`;
-    await conn.query(`FROM ${prefix}query('${createSql.replace(/'/g, "''")}')`);
-  } else {
-    await conn.query(`CREATE TABLE ${tableName} AS SELECT row_number() OVER () AS _id, * FROM read_csv_auto('_import.csv', header=true)`);
-  }
-
-  currentTable = tableName;
-  await loadTableList();
-  await loadTable(tableName);
-  setStatus(`✅ Imported ${tableName}: ${hot.countRows()} rows`);
-  event.target.value = '';
-}
-
-function exportCSV() {
-  const data = hot.getData();
-  const headers = hot.getColHeader();
-  const csv = [headers.join(','), ...data.map(row => row.map(v => `"${(v ?? '').toString().replace(/"/g, '""')}"`).join(','))].join('\n');
-
-  const blob = new Blob([csv], { type: 'text/csv' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `${currentTable}.csv`;
-  a.click();
-  URL.revokeObjectURL(url);
-  setStatus(`✅ Exported ${data.length} rows`);
-}
-function executeFormula() {
-  const bar = document.getElementById('formula-bar');
-  const val = bar.value.trim();
-  if (!val) return;
-
-  // If a cell is selected, write the value to it
-  const selected = hot.getSelected();
-  if (selected && selected.length) {
-    const [r, c] = selected[0];
-    hot.setDataAtCell(r, c, val, 'edit');
-  }
-}
-
-// ── UI Helpers ──
+// ── UI ──
 function switchTab(tab) {
-  const tabs = document.querySelectorAll('#sidebar-tabs button');
-  tabs.forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#sidebar-tabs button').forEach(b => b.classList.remove('active'));
   const idx = tab === 'ai' ? 0 : tab === 'tables' ? 1 : 2;
-  tabs[idx].classList.add('active');
+  document.querySelectorAll('#sidebar-tabs button')[idx].classList.add('active');
   document.getElementById('ai-panel').style.display = tab === 'ai' ? 'flex' : 'none';
   document.getElementById('table-list').style.display = tab === 'tables' ? 'block' : 'none';
   document.getElementById('stats-panel').style.display = tab === 'stats' ? 'block' : 'none';
   if (tab === 'stats') loadStats();
 }
 
-// ── Column Stats ──
-async function loadStats() {
-  const el = document.getElementById('stats-content');
-  if (!currentTable) { el.textContent = 'No table loaded'; return; }
-  el.innerHTML = 'Loading stats...';
-  
-  const prefix = quackConnected ? 'remote.' : '';
-  try {
-    // Get column info
-    const desc = await conn.query(`DESCRIBE ${prefix}${currentTable}`);
-    const types = {};
-    desc.toArray().forEach(r => { if (r[0] !== '_id') types[r[0]] = r[1]; });
-    
-    // Get stats per numeric column
-    let html = `<div style="color:#f0c040;margin-bottom:8px;">📈 ${currentTable}</div>`;
-    html += `<div style="color:#888;margin-bottom:12px;">${_totalRows.toLocaleString()} rows, ${Object.keys(types).length} columns</div>`;
-    
-    for (const [col, dtype] of Object.entries(types)) {
-      html += `<div style="margin-bottom:10px;padding:8px;background:#1a1a1a;border-radius:4px;">`;
-      html += `<div style="font-weight:600;">${col}</div>`;
-      html += `<div style="color:#888;font-size:11px;">${dtype}</div>`;
-      
-      if (dtype && dtype.match(/INT|BIGINT|FLOAT|DOUBLE|DECIMAL|NUMERIC|REAL/i)) {
-        try {
-          const stats = await conn.query(`SELECT min("${col}"), max("${col}"), avg("${col}")::INTEGER, count("${col}") FROM ${prefix}${currentTable}`);
-          const s = stats.toArray()[0];
-          html += `<div style="color:#7ec87e;font-size:11px;margin-top:4px;">Min: ${Number(s[0]).toLocaleString()} | Max: ${Number(s[1]).toLocaleString()} | Avg: ${Number(s[2]).toLocaleString()}</div>`;
-        } catch(e) {}
-      }
-      html += `</div>`;
-    }
-    el.innerHTML = html;
-  } catch(e) {
-    el.innerHTML = `Stats unavailable: ${e.message}`;
-  }
-}
-
 function setStatus(msg) {
   document.getElementById('status').textContent = msg;
 }
 
-// ── Global functions for onclick handlers ──
+// ── Init Grid ──
+function initGrid() {
+  const container = document.getElementById('grid-container');
+  grid = new CanvasGrid(container, { columns: [] });
+  grid.on('cellchange', onCellChange);
+  grid.on('selectionchange', onSelectionChange);
+}
+
+// ── Expose to global scope for onclick ──
 window.loadTable = loadTable;
 window.connectQuack = connectQuack;
 window.askAI = askAI;
@@ -698,7 +622,7 @@ window.currentTable = currentTable;
 // ── Boot ──
 (async function boot() {
   await initDuckDB();
-  // Try Quack first, fall back to local
+  initGrid();
   await connectQuack();
 })();
 </script>
