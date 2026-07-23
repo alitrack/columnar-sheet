@@ -178,8 +178,8 @@ function arrowToColumnar(result) {
       let v = arr[ri];
       if (v === undefined || v === null) {
         colData[name].push(null);
-      } else if (v instanceof Date) {
-        // Arrow Date32/Date64 already returns JS Date objects
+      } else if (Object.prototype.toString.call(v) === '[object Date]') {
+        // Arrow Date32/64 — cross-worker realm, instanceof fails
         colData[name].push(v.toISOString().slice(0, 10));
       } else if (typeStr.includes('date') && typeof v === 'number') {
         // Fallback: raw day count from some Arrow implementations
