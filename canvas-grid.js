@@ -45,6 +45,14 @@ class CanvasGrid {
     this._scrollTop = 0;
     this._scrollLeft = 0;
 
+    // Sort state
+    this._sortCol = null;   // column name
+    this._sortDir = null;   // 'ASC', 'DESC', null
+
+    // Undo/redo
+    this._undoStack = [];   // [{row, col, colName, oldVal, newVal, idVal, table}]
+    this._redoStack = [];
+
     // Canvas
     this._canvas = null;
     this._ctx = null;
@@ -55,9 +63,12 @@ class CanvasGrid {
       bg:          '#0f0f0f',
       headerBg:    '#1a1a1a',
       headerText:  '#888',
+      headerSort:  '#f0c040',
       cellBg:      '#0f0f0f',
       cellBgAlt:   '#111111',
       cellText:    '#e0e0e0',
+      cellNum:     '#7ec87e',
+      cellDate:    '#87ceeb',
       gridLine:    '#1a1a1a',
       selectionBg: '#1e3a5f',
       selectionBorder: '#4a90d9',
@@ -138,6 +149,69 @@ class CanvasGrid {
       ids.add(this._idData[r]);
     }
     return ids;
+  }
+
+  /** Push undo entry before cell change */
+  pushUndo(row, col, colName, oldVal, newVal, idVal, tableName) {
+    this._undoStack.push({ row, col, colName, oldVal, newVal, idVal, table: tableName });
+    if (this._undoStack.length > 200) this._undoStack.shift();
+    this._redoStack = [];
+  }
+
+  /** Can undo? */
+  canUndo() { return this._undoStack.length > 0; }
+
+  /** Can redo? */
+  canRedo() { return this._redoStack.length > 0; }
+
+  /** Pop undo entry */
+  popUndo() {
+    const entry = this._undoStack.pop();
+    if (entry) this._redoStack.push(entry);
+    return entry;
+  }
+
+  /** Pop redo entry */
+  popRedo() {
+    const entry = this._redoStack.pop();
+    if (entry) this._undoStack.push(entry);
+    return entry;
+  }
+
+  /** Sort state */
+  getSortState() { return { col: this._sortCol, dir: this._sortDir }; }
+
+  /** Toggle sort direction for a column. Returns {col, dir} or null to clear. */
+  toggleSort(colName) {
+    if (this._sortCol === colName) {
+      if (this._sortDir === 'ASC') { this._sortDir = 'DESC'; }
+      else { this._sortCol = null; this._sortDir = null; }
+    } else {
+      this._sortCol = colName;
+      this._sortDir = 'ASC';
+    }
+    return this._sortCol ? { col: this._sortCol, dir: this._sortDir } : null;
+  }
+
+  /** Detect column type from sample values */
+  detectColType(colName) {
+    const vals = this._data[colName];
+    if (!vals || vals.length === 0) return 'text';
+    let numCount = 0, dateCount = 0;
+    const sample = Math.min(50, vals.length);
+    for (let i = 0; i < sample; i++) {
+      const v = vals[i];
+      if (v === null || v === undefined) continue;
+      if (typeof v === 'number' || (typeof v === 'bigint')) { numCount++; continue; }
+      const s = String(v).trim();
+      if (s === '' || s === 'NULL' || s === 'null') continue;
+      if (!isNaN(Number(s)) && s !== '') { numCount++; continue; }
+      // Detect date patterns
+      if (/^\d{4}-\d{2}-\d{2}/.test(s) || /^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(s)) { dateCount++; continue; }
+    }
+    if (numCount > sample * 0.6) return 'number';
+    if (dateCount > sample * 0.5) return 'date';
+    return 'text';
   }
 
   /** Render everything */
@@ -291,14 +365,40 @@ class CanvasGrid {
 
     // Column headers
     ctx.font = HEADER_FONT;
-    ctx.fillStyle = C.headerText;
     ctx.textBaseline = 'middle';
+    ctx.textAlign = 'left';
     for (let ci = Math.max(0, firstVisCol); ci <= Math.min(lastVisCol, this.visibleCols.length - 1); ci++) {
       const col = this.visibleCols[ci];
       const cx = colX[ci] - scrollLeft;
       const cw = this._colWidths[col.name] || DEFAULT_COL_WIDTH;
       if (cx + cw < 0 || cx > w / dpr) continue;
-      ctx.fillText(col.name, (cx + 6) * dpr, HEADER_HEIGHT / 2 * dpr);
+
+      // Header background (highlight if sorted)
+      if (col.name === this._sortCol) {
+        ctx.fillStyle = '#1e3a2f';
+        ctx.fillRect(cx * dpr, 0, cw * dpr, HEADER_HEIGHT * dpr);
+      }
+
+      // Column name + sort indicator
+      let label = col.name;
+      if (col.name === this._sortCol) {
+        label += this._sortDir === 'ASC' ? ' ▲' : ' ▼';
+        ctx.fillStyle = C.headerSort;
+      } else {
+        ctx.fillStyle = C.headerText;
+      }
+      ctx.fillText(label, (cx + 6) * dpr, HEADER_HEIGHT / 2 * dpr);
+
+      // Column type indicator (subtle)
+      const colType = this.detectColType(col.name);
+      if (colType === 'number') {
+        ctx.fillStyle = '#444';
+        ctx.font = '9px monospace';
+        ctx.textAlign = 'right';
+        ctx.fillText('#', (cx + cw - 4) * dpr, (HEADER_HEIGHT / 2 + 6) * dpr);
+        ctx.font = HEADER_FONT;
+        ctx.textAlign = 'left';
+      }
     }
 
     // Header bottom line
@@ -358,13 +458,47 @@ class CanvasGrid {
         // Cell text
         const val = this._data[col.name]?.[r];
         const text = val === null || val === undefined ? '' : String(val);
+        const colType = this.detectColType(col.name);
         if (text) {
-          ctx.fillStyle = isSelected ? '#ffffff' : C.cellText;
+          // Pick text color based on type
+          if (colType === 'number') {
+            ctx.fillStyle = isSelected ? '#ffffff' : C.cellNum;
+          } else if (colType === 'date') {
+            ctx.fillStyle = isSelected ? '#ffffff' : C.cellDate;
+          } else {
+            ctx.fillStyle = isSelected ? '#ffffff' : C.cellText;
+          }
+
+          // Format value
+          let displayText = text;
+          if (colType === 'number' && !isNaN(Number(text)) && text !== '') {
+            const n = Number(text);
+            if (Number.isInteger(n)) {
+              displayText = n.toLocaleString();
+            } else {
+              displayText = n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 4 });
+            }
+          } else if (colType === 'date') {
+            // Try to format date nicely
+            const d = new Date(text);
+            if (!isNaN(d.getTime())) {
+              displayText = d.toISOString().slice(0, 10);
+            }
+          }
+
+          // Right-align numbers, left-align text
           ctx.save();
           ctx.beginPath();
           ctx.rect(cx * dpr, ry * dpr, cw * dpr, ROW_HEIGHT * dpr);
           ctx.clip();
-          ctx.fillText(text, (cx + 6) * dpr, (ry + ROW_HEIGHT / 2) * dpr);
+          if (colType === 'number') {
+            ctx.textAlign = 'right';
+            ctx.fillText(displayText, (cx + cw - 6) * dpr, (ry + ROW_HEIGHT / 2) * dpr);
+            ctx.textAlign = 'left';
+          } else {
+            ctx.textAlign = 'left';
+            ctx.fillText(displayText, (cx + 6) * dpr, (ry + ROW_HEIGHT / 2) * dpr);
+          }
           ctx.restore();
         }
 
@@ -455,11 +589,21 @@ class CanvasGrid {
       }
     }, { passive: false });
 
-    // Click → select cell
+    // Click → select cell or sort
     this._canvas.addEventListener('click', (e) => {
       if (this._editingCell) return;
       const cell = this._eventToCell(e);
       if (!cell) return;
+      if (cell.isHeader) {
+        // Sort column
+        const colName = this.visibleCols[cell.col]?.name;
+        if (colName) {
+          this.toggleSort(colName);
+          this._emit('sort', this._sortCol ? { col: this._sortCol, dir: this._sortDir } : null);
+          this._draw();
+        }
+        return;
+      }
       this._selStart = { row: cell.row, col: cell.col };
       this._selEnd = null;
       this._emit('selectionchange', this.getSelection());
@@ -540,6 +684,15 @@ class CanvasGrid {
     const rect = this._canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
+
+    // Clicked on header row → sort
+    if (y < HEADER_HEIGHT) {
+      const colIndex = this._xToCol(x);
+      if (colIndex >= 0 && colIndex < this.visibleCols.length) {
+        return { row: -1, col: colIndex, isHeader: true };
+      }
+      return null;
+    }
 
     // Clicked on row numbers → select row
     if (x < ROW_NUM_WIDTH) {

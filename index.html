@@ -44,6 +44,8 @@
   <div id="toolbar">
     <h1>🦆 ColumnarSheet</h1>
     <button id="btn-quack" class="disconnected" onclick="connectQuack()">Quack: OFF</button>
+    <button onclick="undo()" title="Undo (Ctrl+Z)">↩</button>
+    <button onclick="redo()" title="Redo (Ctrl+Y)">↪</button>
     <button onclick="addRow()" title="Add row">＋ Row</button>
     <button onclick="deleteSelectedRows()" title="Delete selected rows">🗑 Del</button>
     <button id="btn-refresh" onclick="loadTable(currentTable)">⟳</button>
@@ -51,7 +53,7 @@
     <button onclick="exportCSV()">📤 CSV</button>
     <button id="btn-autorefresh" onclick="toggleAutoRefresh()" title="Toggle auto-refresh (collaboration sync)">🔁 Sync</button>
     <input id="csv-upload" type="file" accept=".csv" style="display:none" onchange="importCSV(event)">
-    <input id="formula-bar" placeholder="Click a cell to see value, or type SQL..."
+    <input id="formula-bar" placeholder="=SUM(revenue) | =AVG(B) | =price*qty | Ctrl+Enter to evaluate..."
            style="flex:1;padding:5px 12px;background:#0d0d0d;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-family:monospace;font-size:13px;"
            onkeydown="if(event.key==='Enter'){executeFormula();event.preventDefault()}">
     <span id="status">Ready</span>
@@ -426,10 +428,16 @@ function toggleAutoRefresh() {
 }
 
 // ── Cell Edit → Quack Write-back ──
+let _isUndoRedo = false;
 function onCellChange(row, colIndex, oldVal, newVal) {
   const idVal = _ids[row];
   const colName = grid.visibleCols[colIndex]?.name;
   if (!idVal || !colName) return;
+
+  // Push undo BEFORE executing the change
+  if (!_isUndoRedo) {
+    grid.pushUndo(row, colIndex, colName, oldVal, newVal, idVal, currentTable);
+  }
 
   const safeVal = newVal == null || newVal === '' ? 'NULL' : `'${String(newVal).replace(/'/g, "''")}'`;
   const prefix = quackConnected ? 'remote.' : '';
@@ -545,9 +553,16 @@ function executeFormula() {
   const bar = document.getElementById('formula-bar');
   const val = bar.value.trim();
   if (!val) return;
+
+  // Parse formulas starting with =
+  if (val.startsWith('=')) {
+    evaluateFormula(val.slice(1));
+    return;
+  }
+
+  // Plain value → write to selected cell
   const sel = grid.getSelection();
   if (sel) {
-    // Direct cell write (bypasses Quack — just sets grid data)
     const colName = grid.visibleCols[sel.startCol]?.name;
     if (colName && grid._data[colName]) {
       grid._data[colName][sel.startRow] = val;
@@ -555,6 +570,165 @@ function executeFormula() {
       onCellChange(sel.startRow, sel.startCol, null, val);
     }
   }
+}
+
+async function evaluateFormula(formula) {
+  const sel = grid.getSelection();
+  if (!sel) { setStatus('Select a cell first for formula output'); return; }
+
+  const targetRow = sel.startRow;
+  const targetCol = sel.startCol;
+  const targetColName = grid.visibleCols[targetCol]?.name;
+  const prefix = quackConnected ? 'remote.' : '';
+
+  // ── Helper: column letter → column name ──
+  const colLetterToName = (letter) => {
+    const idx = letter.toUpperCase().charCodeAt(0) - 65;
+    return grid.visibleCols[idx]?.name || letter;
+  };
+
+  // ── Pattern 1: =FUNC(column) — aggregate over entire column ──
+  const aggMatch = formula.match(/^(SUM|AVG|MIN|MAX|COUNT)\(\s*([a-zA-Z0-9_"]+)\s*\)$/i);
+  if (aggMatch) {
+    const func = aggMatch[1].toUpperCase();
+    const col = aggMatch[2].replace(/^"(.*)"$/, '$1');
+    const colName = colLetterToName(col);
+    try {
+      const r = await conn.query(`SELECT ${func}("${colName}") FROM ${prefix}${currentTable}`);
+      const rows = r.toArray();
+      const result = rows.length > 0 ? rows[0][0] : null;
+      grid._data[targetColName][targetRow] = result;
+      grid.render();
+      onCellChange(targetRow, targetCol, null, result);
+      setStatus(`✅ ${func}(${colName}) = ${result}`);
+    } catch(e) {
+      setStatus(`❌ Formula error: ${e.message.substring(0, 60)}`);
+    }
+    return;
+  }
+
+  // ── Pattern 2: =FUNC(col WHERE cond) — aggregate with filter ──
+  const aggFilterMatch = formula.match(/^(SUM|AVG|MIN|MAX|COUNT)\(\s*([a-zA-Z0-9_"]+)\s+WHERE\s+(.+)\)$/i);
+  if (aggFilterMatch) {
+    const func = aggFilterMatch[1].toUpperCase();
+    const col = aggFilterMatch[2].replace(/^"(.*)"$/, '$1');
+    const colName = colLetterToName(col);
+    const condition = aggFilterMatch[3];
+    try {
+      const r = await conn.query(`SELECT ${func}("${colName}") FROM ${prefix}${currentTable} WHERE ${condition}`);
+      const rows = r.toArray();
+      const result = rows.length > 0 ? rows[0][0] : null;
+      grid._data[targetColName][targetRow] = result;
+      grid.render();
+      onCellChange(targetRow, targetCol, null, result);
+      setStatus(`✅ ${func}(${colName} WHERE ${condition}) = ${result}`);
+    } catch(e) {
+      setStatus(`❌ Formula error: ${e.message.substring(0, 60)}`);
+    }
+    return;
+  }
+
+  // ── Pattern 3: =expression with column names — per-row computation ──
+  // Replace A, B, C... with column names, then eval via DuckDB
+  let exprSql = formula;
+  for (let i = 0; i < grid.visibleCols.length; i++) {
+    const letter = String.fromCharCode(65 + i);
+    const cname = grid.visibleCols[i].name;
+    // Match column letter as word boundary
+    exprSql = exprSql.replace(new RegExp(`\\b${letter}\\b`, 'gi'), `"${cname}"`);
+  }
+
+  try {
+    const idVal = _ids[targetRow];
+    const r = await conn.query(`SELECT ${exprSql} FROM ${prefix}${currentTable} WHERE _id = ${idVal}`);
+    const rows = r.toArray();
+    const result = rows.length > 0 ? rows[0][0] : null;
+    grid._data[targetColName][targetRow] = result;
+    grid.render();
+    onCellChange(targetRow, targetCol, null, result);
+    setStatus(`✅ =${formula} = ${result !== null ? result : 'NULL'}`);
+  } catch(e) {
+    setStatus(`❌ Formula error: ${e.message.substring(0, 60)}`);
+  }
+}
+
+// ── Undo/Redo ──
+async function undo() {
+  if (!grid.canUndo()) { setStatus('Nothing to undo'); return; }
+  const entry = grid.popUndo();
+  _isUndoRedo = true;
+  try {
+    // Write old value back to grid
+    grid._data[entry.colName][entry.row] = entry.oldVal;
+    grid.render();
+
+    // Write old value back to DuckDB
+    const safeVal = entry.oldVal == null || entry.oldVal === ''
+      ? 'NULL' : `'${String(entry.oldVal).replace(/'/g, "''")}'`;
+    const prefix = quackConnected ? 'remote.' : '';
+    const sql = quackConnected
+      ? `FROM ${prefix}query('UPDATE ${currentTable} SET "${entry.colName}" = ${safeVal} WHERE _id = ${entry.idVal}')`
+      : `UPDATE ${currentTable} SET "${entry.colName}" = ${safeVal} WHERE _id = ${entry.idVal}`;
+    await conn.query(sql);
+    setStatus(`↩ Undo: ${entry.colName}[${entry.row}] restored`);
+  } catch(e) {
+    setStatus(`❌ Undo failed: ${e.message.substring(0, 50)}`);
+  } finally {
+    _isUndoRedo = false;
+  }
+}
+
+async function redo() {
+  if (!grid.canRedo()) { setStatus('Nothing to redo'); return; }
+  const entry = grid.popRedo();
+  _isUndoRedo = true;
+  try {
+    grid._data[entry.colName][entry.row] = entry.newVal;
+    grid.render();
+
+    const safeVal = entry.newVal == null || entry.newVal === ''
+      ? 'NULL' : `'${String(entry.newVal).replace(/'/g, "''")}'`;
+    const prefix = quackConnected ? 'remote.' : '';
+    const sql = quackConnected
+      ? `FROM ${prefix}query('UPDATE ${currentTable} SET "${entry.colName}" = ${safeVal} WHERE _id = ${entry.idVal}')`
+      : `UPDATE ${currentTable} SET "${entry.colName}" = ${safeVal} WHERE _id = ${entry.idVal}`;
+    await conn.query(sql);
+    setStatus(`↪ Redo: ${entry.colName}[${entry.row}] restored`);
+  } catch(e) {
+    setStatus(`❌ Redo failed: ${e.message.substring(0, 50)}`);
+  } finally {
+    _isUndoRedo = false;
+  }
+}
+
+// ── Sort handler ──
+function onSort(sortState) {
+  if (sortState) {
+    setStatus(`Sorting by ${sortState.col} ${sortState.dir}...`);
+  } else {
+    setStatus('Sort cleared — loading default order...');
+  }
+  _pageOffset = 0;
+  _ids = [];
+
+  const prefix = quackConnected ? 'remote.' : '';
+  let orderClause = sortState
+    ? `ORDER BY "${sortState.col}" ${sortState.dir}`
+    : 'ORDER BY _id';
+
+  conn.query(`SELECT _id, * FROM ${prefix}${currentTable} ${orderClause} LIMIT ${PAGE_SIZE}`).then(result => {
+    const { colData, idData } = arrowToColumnar(result);
+    _ids = idData;
+    _pageOffset = idData.length;
+    grid.setColumns(Object.keys(colData).map(n => ({ name: n, type: 'auto' })));
+    grid.setColumnarData(colData, idData);
+    grid.setTotalRows(_totalRows);
+    grid.render();
+    updateLoadMoreBar();
+    setStatus(`${currentTable}: ${idData.length} rows${sortState ? ` (sorted by ${sortState.col} ${sortState.dir})` : ''}`);
+  }).catch(e => {
+    setStatus(`Sort failed: ${e.message.substring(0, 50)}`);
+  });
 }
 
 // ── AI Assistant ──
@@ -795,6 +969,21 @@ function initGrid() {
   grid = new CanvasGrid(container, { columns: [] });
   grid.on('cellchange', onCellChange);
   grid.on('selectionchange', onSelectionChange);
+  grid.on('sort', onSort);
+
+  // Keyboard shortcuts: Ctrl+Z / Ctrl+Y
+  document.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey) {
+      if (e.key === 'z' || e.key === 'Z') {
+        e.preventDefault();
+        if (e.shiftKey) redo(); else undo();
+      }
+      if (e.key === 'y' || e.key === 'Y') {
+        e.preventDefault();
+        redo();
+      }
+    }
+  });
 }
 
 // ── Expose to global scope for onclick ──
@@ -807,6 +996,8 @@ window.onAIBackendChange = onAIBackendChange;
 window.addRow = addRow;
 window.deleteSelectedRows = deleteSelectedRows;
 window.executeFormula = executeFormula;
+window.undo = undo;
+window.redo = redo;
 window.importCSV = importCSV;
 window.exportCSV = exportCSV;
 window.loadMore = loadMore;
