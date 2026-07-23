@@ -7,43 +7,88 @@
 <script src="canvas-grid.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e0e0e0; transition: background 0.3s, color 0.3s; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; transition: background 0.3s, color 0.3s; }
   #app { display: flex; flex-direction: column; height: 100vh; }
-  #toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #1a1a1a; border-bottom: 1px solid #333; min-height: 40px; transition: background 0.3s; }
-  #toolbar h1 { font-size: 17px; color: #f0c040; margin-right: 20px; }
-  #toolbar button { padding: 5px 14px; border: 1px solid #444; background: #2a2a2a; color: #ccc; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap; }
-  #toolbar button:hover { background: #3a3a3a; }
-  #toolbar button.connected { border-color: #4caf50; color: #4caf50; }
-  #toolbar button.disconnected { border-color: #f44336; color: #f44336; }
-  #status { font-size: 11px; color: #888; flex: 1; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #0f0f0f; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; transition: opacity 0.3s; }
+  #toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; min-height: 40px; transition: background 0.3s; }
+
+  /* ── Dark theme (default) ── */
+  body, body.theme-dark { background: #0f0f0f; color: #e0e0e0; }
+  body.theme-dark #toolbar { background: #1a1a1a; border-bottom: 1px solid #333; }
+  body.theme-dark #toolbar h1 { color: #f0c040; }
+  body.theme-dark #toolbar button { border-color: #444; background: #2a2a2a; color: #ccc; }
+  body.theme-dark #toolbar button:hover { background: #3a3a3a; }
+  body.theme-dark #sidebar { background: #141414; border-left-color: #333; }
+  body.theme-dark #sidebar-tabs button { color: #888; }
+  body.theme-dark #sidebar-tabs button.active { color: #f0c040; }
+  body.theme-dark #ai-messages .msg.user { background: #1e3a5f; color: #ddd; }
+  body.theme-dark #ai-messages .msg.assistant { background: #1a2a1a; color: #ddd; }
+  body.theme-dark #ai-messages .msg.sql { background: #0d0d0d; color: #7ec87e; }
+  body.theme-dark #ai-input, body.theme-dark #ai-api-key, body.theme-dark #ai-endpoint, body.theme-dark #ai-model,
+  body.theme-dark #formula-bar { background: #0d0d0d; border-color: #333; color: #e0e0e0; }
+  body.theme-dark #ai-send { background: #f0c040; color: #0f0f0f; }
+  body.theme-dark #stats-panel, body.theme-dark #table-list, body.theme-dark #ai-settings { background: #141414; color: #ccc; }
+  body.theme-dark #load-more-bar { background: #1a1a1a; }
+  body.theme-dark #theme-selector { background: #0d0d0d; border-color: #444; color: #ccc; }
+  body.theme-dark #status { color: #888; }
+  body.theme-dark #loading-overlay { background: #0f0f0f; }
+
+  /* ── Light theme ── */
+  body.theme-light { background: #fff; color: #222; }
+  body.theme-light #toolbar { background: #f5f5f5; border-bottom: 1px solid #ddd; }
+  body.theme-light #toolbar h1 { color: #c87500; }
+  body.theme-light #toolbar button { border-color: #ccc; background: #f0f0f0; color: #333; }
+  body.theme-light #toolbar button:hover { background: #e0e0e0; }
+  body.theme-light #sidebar { background: #fafafa; border-left-color: #ddd; }
+  body.theme-light #sidebar-tabs button { color: #777; }
+  body.theme-light #sidebar-tabs button.active { color: #c87500; }
+  body.theme-light #ai-messages .msg.user { background: #d0e0ff; color: #222; }
+  body.theme-light #ai-messages .msg.assistant { background: #d0f0d0; color: #222; }
+  body.theme-light #ai-messages .msg.sql { background: #f0f0f0; color: #1a6e1a; }
+  body.theme-light #ai-input, body.theme-light #ai-api-key, body.theme-light #ai-endpoint, body.theme-light #ai-model,
+  body.theme-light #formula-bar { background: #fff; border-color: #ccc; color: #333; }
+  body.theme-light #ai-send { background: #c87500; color: #fff; }
+  body.theme-light #stats-panel, body.theme-light #table-list, body.theme-light #ai-settings { background: #fafafa; color: #333; }
+  body.theme-light #load-more-bar { background: #f5f5f5; }
+  body.theme-light #theme-selector { background: #fff; border-color: #ccc; color: #333; }
+  body.theme-light #status { color: #888; }
+  body.theme-light #loading-overlay { background: #fff; }
+  body.theme-light #loading-text { color: #666 !important; }
+
+  /* ── Layout (theme-independent) ── */
+  #toolbar h1 { font-size: 17px; margin-right: 20px; }
+  #toolbar button { padding: 5px 14px; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap; border-style: solid; border-width: 1px; }
+  #toolbar button.connected { border-color: #4caf50 !important; color: #4caf50 !important; }
+  #toolbar button.disconnected { border-color: #f44336 !important; color: #f44336 !important; }
+  #status { font-size: 11px; flex: 1; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #loading-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 1000; transition: opacity 0.3s; }
   #loading-overlay.hidden { opacity: 0; pointer-events: none; }
   #loading-spinner { width: 40px; height: 40px; border: 3px solid #333; border-top-color: #f0c040; border-radius: 50%; animation: spin 0.8s linear infinite; }
   @keyframes spin { to { transform: rotate(360deg); } }
-  #loading-text { margin-top: 16px; color: #888; font-size: 13px; }
+  #loading-text { margin-top: 16px; font-size: 13px; }
   #content { display: flex; flex: 1; overflow: hidden; }
   #grid-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   #grid-container { flex: 1; overflow: hidden; position: relative; }
-  #sidebar { width: 340px; background: #141414; border-left: 1px solid #333; display: flex; flex-direction: column; transition: background 0.3s, border-color 0.3s; }
+  #sidebar { width: 340px; border-left-style: solid; border-left-width: 1px; display: flex; flex-direction: column; transition: background 0.3s, border-color 0.3s; }
   #sidebar-tabs { display: flex; border-bottom: 1px solid #333; }
-  #sidebar-tabs button { flex: 1; padding: 9px; background: none; border: none; color: #888; cursor: pointer; font-size: 13px; }
-  #sidebar-tabs button.active { color: #f0c040; border-bottom: 2px solid #f0c040; }
+  #sidebar-tabs button { flex: 1; padding: 9px; background: none; border: none; cursor: pointer; font-size: 13px; }
+  #sidebar-tabs button.active { border-bottom: 2px solid; }
   #ai-panel { flex: 1; display: flex; flex-direction: column; padding: 12px; overflow: hidden; }
   #ai-messages { flex: 1; overflow-y: auto; font-size: 13px; margin-bottom: 10px; }
   #ai-messages .msg { margin-bottom: 8px; padding: 8px; border-radius: 6px; word-break: break-word; }
-  #ai-input { flex: 1; padding: 8px; background: #0d0d0d; border: 1px solid #333; border-radius: 4px; color: #e0e0e0; font-size: 13px; transition: background 0.3s, border-color 0.3s, color 0.3s; }
-  #formula-bar, #ai-input { transition: background 0.3s, border-color 0.3s, color 0.3s; }
-  #ai-messages .msg.user { background: #1e3a5f; margin-left: 24px; }
-  #ai-messages .msg.assistant { background: #1a2a1a; margin-right: 24px; }
-  #ai-messages .msg.sql { font-family: monospace; background: #0d0d0d; padding: 8px; border-radius: 4px; margin: 4px 0; font-size: 12px; color: #7ec87e; white-space: pre-wrap; }
+  #ai-messages .msg.user { margin-left: 24px; }
+  #ai-messages .msg.assistant { margin-right: 24px; }
+  #ai-messages .msg.sql { font-family: monospace; padding: 8px; border-radius: 4px; margin: 4px 0; font-size: 12px; white-space: pre-wrap; }
   #ai-input-area { display: flex; gap: 8px; }
-  #ai-input { flex: 1; padding: 8px; background: #1a1a1a; border: 1px solid #333; border-radius: 4px; color: #e0e0e0; font-size: 13px; }
-  #ai-send { padding: 8px 16px; background: #f0c040; color: #0f0f0f; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
+  #ai-input, #ai-api-key, #ai-endpoint, #ai-model, #formula-bar { padding: 8px; border-radius: 4px; font-size: 13px; border-style: solid; border-width: 1px; transition: background 0.3s, border-color 0.3s, color 0.3s; }
+  #ai-input, #formula-bar { flex: 1; }
+  #ai-send { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-weight: 600; }
   #table-list { padding: 12px; font-size: 13px; overflow-y: auto; }
   #table-list .table-item { padding: 6px 8px; cursor: pointer; border-radius: 4px; }
   #table-list .table-item:hover { background: #2a2a2a; }
   #table-list .table-item.selected { background: #1e3a5f; }
   #stats-panel { padding: 12px; overflow-y: auto; font-size: 13px; }
+  #ai-settings { padding: 8px; margin-top: 8px; border-radius: 4px; }
+  #load-more-bar { padding: 8px; text-align: center; }
 </style>
 </head>
 <body>
@@ -1026,77 +1071,8 @@ async function loadStats() {
 function setAppTheme(mode) {
   if (!grid) return;
   const actual = grid.setTheme(mode);
-  const C = grid.getColors();
   document.getElementById('theme-selector').value = mode;
-
-  // Update CSS elements to match theme
-  const root = document.body.style;
-  root.background = C.appBg;
-  root.color = C.toolbarText;
-
-  const toolbar = document.getElementById('toolbar').style;
-  toolbar.background = C.toolbarBg;
-  toolbar.borderBottomColor = C.sidebarBorder;
-
-  const sidebar = document.getElementById('sidebar').style;
-  sidebar.background = C.sidebarBg;
-  sidebar.borderLeftColor = C.sidebarBorder;
-
-  // Input fields
-  ['formula-bar', 'ai-input', 'ai-api-key', 'ai-endpoint', 'ai-model'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) {
-      el.style.background = C.inputBg;
-      el.style.borderColor = C.inputBorder;
-      el.style.color = C.inputText;
-    }
-  });
-
-  // Buttons
-  document.querySelectorAll('#toolbar button').forEach(btn => {
-    btn.style.background = C.buttonBg;
-    btn.style.borderColor = C.buttonBorder;
-    btn.style.color = C.buttonText;
-  });
-
-  // Theme selector
-  const sel = document.getElementById('theme-selector');
-  if (sel) { sel.style.background = C.inputBg; sel.style.borderColor = C.inputBorder; sel.style.color = C.inputText; }
-
-  // Status
-  document.getElementById('status').style.color = C.headerText;
-
-  // Sidebar tabs
-  document.querySelectorAll('#sidebar-tabs button').forEach(b => {
-    b.style.color = C.sidebarTabText;
-  });
-
-  // AI messages
-  document.querySelectorAll('#ai-messages .msg.user').forEach(el => {
-    el.style.background = C.msgUserBg;
-  });
-  document.querySelectorAll('#ai-messages .msg.assistant').forEach(el => {
-    el.style.background = C.msgAsstBg;
-  });
-  const sqlBlocks = document.querySelectorAll('#ai-messages .msg.sql');
-  sqlBlocks.forEach(el => { el.style.background = C.inputBg; el.style.color = C.cellNum; });
-
-  // AI settings, stats, table list
-  ['ai-settings', 'stats-panel', 'table-list'].forEach(id => {
-    const el = document.getElementById(id);
-    if (el) el.style.background = C.sidebarBg;
-  });
-
-  // Table list items already rendered
-  document.querySelectorAll('#table-list .table-item').forEach(el => {
-    el.style.color = C.toolbarText;
-  });
-
-  // Load more bar
-  const lmb = document.getElementById('load-more-bar');
-  if (lmb) lmb.style.background = C.toolbarBg;
-
-  // Save preference
+  document.body.className = 'theme-' + actual;
   try { localStorage.setItem('columnar-sheet-theme', mode); } catch(e) {}
 }
 
