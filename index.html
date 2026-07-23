@@ -90,6 +90,7 @@
           <input id="ai-api-key" type="password" placeholder="API Key (moonbridge/local = skip)" style="width:100%;padding:6px;background:#1a1a1a;color:#e0e0e0;border:1px solid #333;border-radius:4px;margin-bottom:6px;">
           <input id="ai-endpoint" placeholder="Endpoint URL (default auto)" style="width:100%;padding:6px;background:#1a1a1a;color:#e0e0e0;border:1px solid #333;border-radius:4px;margin-bottom:6px;">
           <input id="ai-model" placeholder="Model name (default auto)" style="width:100%;padding:6px;background:#1a1a1a;color:#e0e0e0;border:1px solid #333;border-radius:4px;">
+          <button onclick="clearAICache()" style="margin-top:6px;width:100%;padding:6px;background:#2a1a1a;color:#f66;border:1px solid #633;border-radius:4px;cursor:pointer;font-size:12px;">🗑 Clear SQL Cache</button>
         </div>
       </div>
       <div id="table-list" style="display:none"></div>
@@ -585,6 +586,15 @@ function onAIBackendChange() {
   if (keyless.includes(backend)) keyInput.value = '';
 }
 
+async function clearAICache() {
+  try {
+    await fetch('/api/ai-sql', { method: 'DELETE' });
+    setStatus('✅ SQL cache cleared');
+  } catch(e) {
+    setStatus('Cache clear not supported');
+  }
+}
+
 async function askAI() {
   const input = document.getElementById('ai-input');
   const question = input.value.trim();
@@ -656,25 +666,47 @@ Rules:
 
   addMessage('assistant', '🤔 Generating SQL...');
 
+  let sql = null;
+  let cached = false;
+
+  // ── Try DuckDB AI with cache first (fast, free, smart) ──
   try {
-    const cfg = getAIConfig();
-    if (!cfg.key) throw new Error('API key not configured. Click ⚙️ to set up.');
-
-    const aiResp = await fetch(cfg.url, {
+    const aiSqlResp = await fetch('/api/ai-sql', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.key}` },
-      body: JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content: sqlPrompt }], temperature: 0 })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question, schema: schemaLines.join('; ') })
     });
-
-    if (!aiResp.ok) {
-      const errText = await aiResp.text().catch(() => '');
-      throw new Error(`AI API ${aiResp.status}: ${errText.substring(0, 80)}`);
+    if (aiSqlResp.ok) {
+      const data = await aiSqlResp.json();
+      sql = data.sql;
+      cached = data.cached;
     }
+  } catch(e) { /* fall through to MoonBridge */ }
 
-    const aiData = await aiResp.json();
-    let sql = aiData.choices[0].message.content.trim();
-    sql = sql.replace(/```sql\n?/g, '').replace(/```/g, '').trim();
-    addMessage('assistant', `<div class="sql">${sql}</div>`);
+  // ── Fallback: MoonBridge proxy ──
+  if (!sql) {
+    try {
+      const cfg = getAIConfig();
+      const aiResp = await fetch(cfg.url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${cfg.key}` },
+        body: JSON.stringify({ model: cfg.model, messages: [{ role: 'user', content: sqlPrompt }], temperature: 0 })
+      });
+      if (!aiResp.ok) {
+        const errText = await aiResp.text().catch(() => '');
+        throw new Error(`AI API ${aiResp.status}: ${errText.substring(0, 80)}`);
+      }
+      const aiData = await aiResp.json();
+      sql = aiData.choices[0].message.content.trim();
+    } catch(e) {
+      addMessage('assistant', `❌ ${e.message}`);
+      return;
+    }
+  }
+
+  sql = sql.replace(/```sql\n?/g, '').replace(/```/g, '').trim();
+  const cacheTag = cached ? ' ⚡cached' : '';
+  addMessage('assistant', `<div class="sql">${sql}${cacheTag}</div>`);
 
     // Execute SQL
     const execSql = quackConnected ? sql : sql.replace(new RegExp(`\\b${currentTable}\\b`, 'g'), currentTable);
