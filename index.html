@@ -182,8 +182,9 @@ function arrowToColumnar(result) {
         // Arrow Date32/64 — cross-worker realm, instanceof fails
         colData[name].push(v.toISOString().slice(0, 10));
       } else if (typeStr.includes('date') && typeof v === 'number') {
-        // Fallback: raw day count from some Arrow implementations
-        const d = new Date(v * 86400000);
+        // Arrow Date32 toArray() returns ms timestamps (e.g. 1761264000000)
+        // NOT day counts — no multiplication needed
+        const d = new Date(v > 1e11 ? v : v * 86400000);
         colData[name].push(isNaN(d.getTime()) ? v : d.toISOString().slice(0, 10));
       } else if (typeStr.includes('timestamp') && (typeof v === 'bigint' || typeof v === 'number')) {
         const ts = new Date(typeof v === 'bigint' ? Number(v) / 1000 : v);
