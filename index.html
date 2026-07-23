@@ -445,7 +445,6 @@ function toggleAutoRefresh() {
 }
 
 // ── Cell Edit → Quack Write-back ──
-let _isUndoRedo = false;
 function onCellChange(row, colIndex, oldVal, newVal) {
   const idVal = _ids[row];
   const colName = grid.visibleCols[colIndex]?.name;
