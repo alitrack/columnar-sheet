@@ -125,8 +125,9 @@ import * as duckdb from 'https://fastly.jsdelivr.net/npm/@duckdb/duckdb-wasm/+es
 // ── Globals ──
 let db, conn, grid;
 let currentTable = 'sales';
+let _isUndoRedo = false;
 let quackConnected = false;
-const QUACK_SERVER = 'localhost';
+const QUACK_HOST = window.location.hostname;
 const QUACK_PORT = '9494';
 const QUACK_TOKEN = 'columnar-sheet-token-2026';
 const PAGE_SIZE = 500;
@@ -184,8 +185,8 @@ async function connectQuack() {
   try {
     await conn.query(`INSTALL quack`);
     await conn.query(`LOAD quack`);
-    await conn.query(`CREATE SECRET (TYPE quack, TOKEN '${QUACK_TOKEN}', SCOPE 'quack:${QUACK_SERVER}:${QUACK_PORT}')`);
-    await conn.query(`ATTACH 'quack:${QUACK_SERVER}:${QUACK_PORT}' AS remote`);
+    await conn.query(`CREATE SECRET (TYPE quack, TOKEN '${QUACK_TOKEN}', SCOPE 'quack:${QUACK_HOST}:${QUACK_PORT}')`);
+    await conn.query(`ATTACH 'quack:${QUACK_HOST}:${QUACK_PORT}' AS remote`);
 
     quackConnected = true;
     btn.textContent = 'Quack: ON';
