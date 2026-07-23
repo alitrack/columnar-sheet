@@ -49,6 +49,7 @@
     <button id="btn-refresh" onclick="loadTable(currentTable)">⟳</button>
     <button onclick="document.getElementById('csv-upload').click()">📥 CSV</button>
     <button onclick="exportCSV()">📤 CSV</button>
+    <button id="btn-autorefresh" onclick="toggleAutoRefresh()" title="Toggle auto-refresh (collaboration sync)">🔁 Sync</button>
     <input id="csv-upload" type="file" accept=".csv" style="display:none" onchange="importCSV(event)">
     <input id="formula-bar" placeholder="Click a cell to see value, or type SQL..."
            style="flex:1;padding:5px 12px;background:#0d0d0d;border:1px solid #333;border-radius:4px;color:#e0e0e0;font-family:monospace;font-size:13px;"
@@ -203,17 +204,47 @@ async function loadLocalFallback() {
 async function loadTableList() {
   const container = document.getElementById('table-list');
   try {
-    let tables;
+    let tableNames;
     if (quackConnected) {
-      const result = await conn.query(`FROM remote.query('SHOW TABLES')`);
-      tables = result.toArray().map(r => r[0]);
+      // Quick table discovery — probe known candidates
+      const candidates = ['sales', 'products', 'regions'];
+      tableNames = [];
+      for (const t of candidates) {
+        try {
+          await conn.query(`SELECT * FROM remote.${t} LIMIT 1`);
+          tableNames.push(t);
+        } catch(e) {}
+      }
+      if (tableNames.length === 0 && currentTable) tableNames = [currentTable];
     } else {
       const result = await conn.query(`SELECT table_name FROM duckdb_tables()`);
-      tables = result.toArray().map(r => r[0]);
+      tableNames = result.toArray().map(r => r[0]);
     }
-    container.innerHTML = tables.map(t =>
-      `<div class="table-item ${t===currentTable?'selected':''}" onclick="loadTable('${t}')">📊 ${t}</div>`
-    ).join('');
+
+    // Get row counts
+    const counts = {};
+    for (const t of tableNames) {
+      try {
+        const prefix = quackConnected ? 'remote.' : '';
+        const cr = quackConnected
+          ? await conn.query(`FROM ${prefix}query('SELECT count(*) FROM ${t}')`)
+          : await conn.query(`SELECT count(*) FROM ${t}`);
+        const rows = cr.toArray();
+        counts[t] = (rows.length > 0 && rows[0][0] != null) ? Number(rows[0][0]) : 0;
+      } catch(e) { counts[t] = 0; }
+    }
+
+    container.innerHTML = tableNames.map(t => `
+      <div class="table-item ${t===currentTable?'selected':''}" style="display:flex;align-items:center;justify-content:space-between;">
+        <span onclick="loadTable('${t}')" style="flex:1;cursor:pointer;">📊 ${t}</span>
+        <span style="color:#888;font-size:11px;margin-right:8px;">${counts[t]||'?'} rows</span>
+        <span style="display:flex;gap:4px;">
+          <button onclick="event.stopPropagation();duplicateTable('${t}')" title="Duplicate" style="background:none;border:none;color:#888;cursor:pointer;font-size:11px;">📋</button>
+          <button onclick="event.stopPropagation();renameTablePrompt('${t}')" title="Rename" style="background:none;border:none;color:#888;cursor:pointer;font-size:11px;">✏️</button>
+          ${t !== currentTable ? `<button onclick="event.stopPropagation();dropTable('${t}')" title="Delete" style="background:none;border:none;color:#f66;cursor:pointer;font-size:11px;">🗑</button>` : ''}
+        </span>
+      </div>
+    `).join('');
   } catch(e) {
     container.innerHTML = `<div style="color:#888;padding:12px;">No tables</div>`;
   }
@@ -284,6 +315,112 @@ function updateLoadMoreBar() {
   if (hasMore) {
     const remaining = _totalRows > 0 ? ` (${(_totalRows - loaded).toLocaleString()} remaining)` : '';
     btn.textContent = `Load more...${remaining}`;
+  }
+}
+
+// ── Table Management ──
+async function duplicateTable(name) {
+  const newName = name + '_copy';
+  const prefix = quackConnected ? 'remote.' : '';
+  try {
+    const sql = `CREATE TABLE ${newName} AS SELECT * FROM ${name}`;
+    if (quackConnected) {
+      await conn.query(`FROM ${prefix}query('${sql.replace(/'/g, "''")}')`);
+    } else {
+      await conn.query(sql);
+    }
+    setStatus(`✅ Duplicated: ${newName}`);
+    await loadTableList();
+  } catch(e) {
+    setStatus(`❌ Duplicate failed: ${e.message.substring(0, 50)}`);
+  }
+}
+
+function renameTablePrompt(name) {
+  const newName = prompt(`Rename table "${name}":`, name);
+  if (!newName || newName === name) return;
+  renameTable(name, newName);
+}
+
+async function renameTable(oldName, newName) {
+  const prefix = quackConnected ? 'remote.' : '';
+  try {
+    const sql = `ALTER TABLE ${oldName} RENAME TO ${newName}`;
+    if (quackConnected) {
+      await conn.query(`FROM ${prefix}query('${sql.replace(/'/g, "''")}')`);
+    } else {
+      await conn.query(sql);
+    }
+    if (currentTable === oldName) currentTable = newName;
+    setStatus(`✅ Renamed: ${oldName} → ${newName}`);
+    await loadTableList();
+    if (currentTable === newName) await loadTable(newName);
+  } catch(e) {
+    setStatus(`❌ Rename failed: ${e.message.substring(0, 50)}`);
+  }
+}
+
+async function dropTable(name) {
+  if (!confirm(`Delete table "${name}"? This cannot be undone.`)) return;
+  const prefix = quackConnected ? 'remote.' : '';
+  try {
+    const sql = `DROP TABLE ${name}`;
+    if (quackConnected) {
+      await conn.query(`FROM ${prefix}query('${sql.replace(/'/g, "''")}')`);
+    } else {
+      await conn.query(sql);
+    }
+    setStatus(`✅ Dropped: ${name}`);
+    if (currentTable === name) currentTable = 'sales';
+    await loadTableList();
+    await loadTable(currentTable);
+  } catch(e) {
+    setStatus(`❌ Drop failed: ${e.message.substring(0, 50)}`);
+  }
+}
+
+// ── Collaboration: auto-refresh ──
+let _autoRefreshInterval = null;
+function enableAutoRefresh(seconds = 30) {
+  if (_autoRefreshInterval) clearInterval(_autoRefreshInterval);
+  _autoRefreshInterval = setInterval(async () => {
+    if (!quackConnected || !currentTable) return;
+    try {
+      // Reload table list silently
+      await loadTableList();
+      // Quick refresh: reload current page to pick up changes
+      const prefix = quackConnected ? 'remote.' : '';
+      const result = await conn.query(`SELECT _id, * FROM ${prefix}${currentTable} ORDER BY _id LIMIT ${PAGE_SIZE}`);
+      const { colData, idData } = arrowToColumnar(result);
+      // Only update if row count changed (someone else added/deleted)
+      if (idData.length !== grid.rowCount || (idData.length > 0 && idData[0] !== _ids[0])) {
+        _ids = idData;
+        _pageOffset = 0;
+        grid.setColumns(Object.keys(colData).map(n => ({ name: n, type: 'auto' })));
+        grid.setColumnarData(colData, idData);
+        grid.render();
+        updateLoadMoreBar();
+        setStatus(`🔄 Auto-refreshed: ${grid.rowCount} rows`);
+      }
+    } catch(e) { /* silent */ }
+  }, seconds * 1000);
+  setStatus(`🔁 Auto-refresh every ${seconds}s`);
+}
+
+function disableAutoRefresh() {
+  if (_autoRefreshInterval) clearInterval(_autoRefreshInterval);
+  _autoRefreshInterval = null;
+  setStatus('Auto-refresh off');
+}
+
+function toggleAutoRefresh() {
+  const btn = document.getElementById('btn-autorefresh');
+  if (_autoRefreshInterval) {
+    disableAutoRefresh();
+    btn.style.borderColor = '#444';
+  } else {
+    enableAutoRefresh(15); // 15s sync
+    btn.style.borderColor = '#4caf50';
   }
 }
 
@@ -463,8 +600,32 @@ async function askAI() {
     schemaInfo = r.toArray().map(r => `${r[0]} (${r[1]})`).join(', ');
   } catch(e) { schemaInfo = '(schema unavailable)'; }
 
+  // Get ALL table schemas for cross-table AI queries
+  const allSchemas = [];
+  try {
+    const tables = quackConnected
+      ? (await conn.query(`FROM remote.query('SELECT table_name FROM information_schema.tables WHERE table_schema = ''main''')`)).toArray()
+      : (await conn.query(`SELECT table_name FROM duckdb_tables()`)).toArray();
+    const tableNames = tables.map(r => r[0]).filter(Boolean);
+
+    for (const t of tableNames.slice(0, 5)) { // limit to 5 tables for token budget
+      try {
+        const prefix = quackConnected ? 'remote.' : '';
+        const desc = await conn.query(`DESCRIBE ${prefix}${t}`);
+        const cols = desc.toArray().map(r => `${r[0]} (${r[1]})`).join(', ');
+        allSchemas.push(`  ${prefix}${t}: ${cols}`);
+      } catch(e) {}
+    }
+  } catch(e) {}
+
   const tableRef = quackConnected ? `remote.${currentTable}` : currentTable;
-  let schemaLines = [`Table: ${tableRef}`, `Columns: ${schemaInfo}`];
+  let schemaLines = [`Primary table: ${tableRef}`];
+  if (allSchemas.length > 1) {
+    schemaLines.push('All available tables:');
+    schemaLines.push(...allSchemas);
+  } else {
+    schemaLines.push(`Columns: ${schemaInfo}`);
+  }
 
   // Sample data
   try {
@@ -617,6 +778,10 @@ window.executeFormula = executeFormula;
 window.importCSV = importCSV;
 window.exportCSV = exportCSV;
 window.loadMore = loadMore;
+window.toggleAutoRefresh = toggleAutoRefresh;
+window.duplicateTable = duplicateTable;
+window.renameTablePrompt = renameTablePrompt;
+window.dropTable = dropTable;
 window.currentTable = currentTable;
 
 // ── Boot ──
