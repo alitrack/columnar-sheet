@@ -375,6 +375,8 @@ class CanvasGrid {
   // ── Drawing ──
 
   _draw() {
+    this._resize();  // ensure canvas matches container size
+
     const ctx = this._ctx;
     const canvas = this._canvas;
     const dpr = this._dpr;
@@ -382,8 +384,9 @@ class CanvasGrid {
     const h = canvas.height;
     const C = this._colors;
 
-    if (canvas.width === 0 || canvas.height === 0) {
-      console.warn('[Grid] Canvas not sized yet, skipping draw');
+    if (w === 0 || h === 0) {
+      console.warn('[Grid] Canvas not sized yet (w=%d, h=%d), retrying in 100ms', w, h);
+      setTimeout(() => this._draw(), 100);
       return;
     }
 
