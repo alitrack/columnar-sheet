@@ -173,17 +173,32 @@ function arrowToColumnar(result) {
     const name = colNames[ci];
     const typeStr = colTypes[ci].toLowerCase();
     const arr = col.toArray();
+    if (arr.length > 0) console.log(`[CS] col[${ci}] '${name}' type=${typeStr} firstVal=`, arr[0], typeof arr[0]);
     for (let ri = 0; ri < numRows; ri++) {
       let v = arr[ri];
       if (v === undefined || v === null) {
         colData[name].push(null);
       } else if (typeStr.includes('date') && typeof v === 'number') {
         // DuckDB DATE = days since 1970-01-01, convert to ISO string
-        const d = new Date(v * 86400000);
-        colData[name].push(d.toISOString().slice(0, 10));
+        const ms = v * 86400000;
+        if (isNaN(ms) || !isFinite(ms)) {
+          colData[name].push(v);
+        } else {
+          const d = new Date(ms);
+          if (isNaN(d.getTime())) {
+            colData[name].push(v);
+          } else {
+            colData[name].push(d.toISOString().slice(0, 10));
+          }
+        }
       } else if (typeStr.includes('timestamp') && typeof v === 'bigint') {
         // DuckDB TIMESTAMP = microseconds since epoch
-        colData[name].push(new Date(Number(v) / 1000).toISOString().replace('T', ' ').slice(0, 19));
+        const ts = new Date(Number(v) / 1000);
+        if (isNaN(ts.getTime())) {
+          colData[name].push(v);
+        } else {
+          colData[name].push(ts.toISOString().replace('T', ' ').slice(0, 19));
+        }
       } else {
         colData[name].push(v);
       }
