@@ -85,7 +85,8 @@
         </div>
         <div id="ai-settings" style="display:none;padding:8px;margin-top:8px;background:#0d0d0d;border-radius:4px;">
           <select id="ai-backend" onchange="onAIBackendChange()" style="width:100%;padding:6px;background:#1a1a1a;color:#e0e0e0;border:1px solid #333;border-radius:4px;margin-bottom:6px;">
-            <option value="local">🖥️ Local (Ollama)</option>
+            <option value="moonbridge" selected>🌉 MoonBridge (DeepSeek)</option>
+            <option value="local" data-keyless="true">🖥️ Local (Ollama)</option>
             <option value="xai">✖️ xAI (Grok)</option>
             <option value="openai">🧠 OpenAI</option>
           </select>
@@ -228,17 +229,22 @@ async function loadTable(name, append = false) {
   if (!append) {
     try {
       if (quackConnected) {
-        // Quack: count via remote.query
-        const cr = await conn.query(`FROM ${prefix}query('SELECT count(*)::BIGINT AS cnt FROM ${currentTable}')`);
-        _totalRows = Number(cr.toArray()[0][0]);
+        // Quack: count via remote.query — may return empty [], handle gracefully
+        const cr = await conn.query(`FROM ${prefix}query('SELECT count(*) AS cnt FROM ${currentTable}')`);
+        const rows = cr.toArray();
+        if (rows.length > 0 && rows[0].length > 0 && rows[0][0] != null) {
+          _totalRows = Number(rows[0][0]);
+        } else {
+          // Quack returned empty — fall back to data-driven estimation
+          _totalRows = 0; // will be set later
+        }
       } else {
         const cr = await conn.query(`SELECT count(*)::BIGINT AS cnt FROM ${currentTable}`);
         _totalRows = Number(cr.toArray()[0][0]);
       }
     } catch(e) {
       console.warn('Count query failed:', e.message);
-      // Fallback: use loaded count, mark as estimated
-      _totalRows = newData?.length || 0;
+      _totalRows = 0;
     }
   }
 
@@ -269,15 +275,21 @@ async function loadTable(name, append = false) {
 
   _pageOffset += newData.length;
 
+  // If count was unknown and we got fewer than PAGE_SIZE, we've loaded all
+  if (_totalRows === 0 && newData.length < PAGE_SIZE) {
+    _totalRows = _data.length;
+  }
+
   renderGrid(_columns, _data, append);
   const loaded = (_data || []).length || 0;
-  const total = _totalRows || 0;
-  setStatus(`${name}: ${loaded.toLocaleString()} / ${total.toLocaleString()} rows`);
+  const total = _totalRows || '?';
+  setStatus(`${name}: ${loaded.toLocaleString()} / ${typeof total === 'number' ? total.toLocaleString() : '?'} rows`);
   await loadTableList();
 }
 
 async function loadMore() {
-  if (_data.length >= _totalRows) return;
+  // _totalRows === 0 means unknown count — keep loading until we hit end
+  if (_totalRows > 0 && _data.length >= _totalRows) return;
   await loadTable(currentTable, true);
 }
 
@@ -297,9 +309,11 @@ function renderGrid(columns, data, append = false) {
   // Show/hide load more bar
   const bar = document.getElementById('load-more-bar');
   const btn = document.getElementById('load-more-btn');
-  if (_data.length < _totalRows && _totalRows > 0) {
+  const hasMore = _totalRows === 0 || _data.length < _totalRows;
+  if (hasMore) {
     bar.style.display = 'block';
-    btn.textContent = `Load more... (${(_totalRows - _data.length).toLocaleString()} remaining)`;
+    const remaining = _totalRows > 0 ? ` (${(_totalRows - _data.length).toLocaleString()} remaining)` : '';
+    btn.textContent = `Load more...${remaining}`;
   } else {
     bar.style.display = 'none';
   }
@@ -365,11 +379,25 @@ function getAIConfig() {
   const model = document.getElementById('ai-model').value.trim();
 
   const defaults = {
-    local:  { url: endpoint || 'http://localhost:11434/v1/chat/completions', model: model || 'qwen2.5:14b', key: 'ollama' },
-    xai:    { url: endpoint || 'https://api.x.ai/v1/chat/completions', model: model || 'grok-4', key: key },
-    openai: { url: endpoint || 'https://api.openai.com/v1/chat/completions', model: model || 'gpt-4o', key: key },
+    moonbridge: {
+      url: endpoint || '/api/ai',
+      model: model || 'deepseek-v4-flash',
+      key: 'moonbridge'  // moon-bridge doesn't validate inbound keys
+    },
+    local:  {
+      url: endpoint || 'http://localhost:11434/v1/chat/completions',
+      model: model || 'qwen2.5:14b', key: 'ollama'
+    },
+    xai:    {
+      url: endpoint || 'https://api.x.ai/v1/chat/completions',
+      model: model || 'grok-4', key: key
+    },
+    openai: {
+      url: endpoint || 'https://api.openai.com/v1/chat/completions',
+      model: model || 'gpt-4o', key: key
+    },
   };
-  const cfg = defaults[backend] || defaults.local;
+  const cfg = defaults[backend] || defaults.moonbridge;
   return { url: cfg.url, model: cfg.model, key: cfg.key };
 }
 
@@ -381,8 +409,9 @@ function toggleAISettings() {
 function onAIBackendChange() {
   const backend = document.getElementById('ai-backend').value;
   const keyInput = document.getElementById('ai-api-key');
-  keyInput.style.display = backend === 'local' ? 'none' : 'block';
-  if (backend === 'local') keyInput.value = '';
+  const keyless = ['moonbridge', 'local'];
+  keyInput.style.display = keyless.includes(backend) ? 'none' : 'block';
+  if (keyless.includes(backend)) keyInput.value = '';
 }
 
 async function askAI() {
@@ -403,7 +432,36 @@ async function askAI() {
     schemaInfo = '(schema unavailable)';
   }
 
-  const sqlPrompt = `You are a DuckDB SQL expert. Schema: ${schemaInfo}. Table: ${currentTable}.\nConvert to DuckDB SQL: "${question}"\nReturn ONLY the SQL, no explanation, no markdown.`;
+  // Build a rich prompt with schema and examples
+  const tableRef = quackConnected ? `remote.${currentTable}` : currentTable;
+  let schemaLines = [`Table: ${tableRef}`, `Columns: ${schemaInfo}`];
+
+  // Add sample data for context (first 3 rows)
+  try {
+    const sample = await conn.query(`SELECT * FROM ${prefix}${currentTable} LIMIT 3`);
+    const sampleRows = sample.toArray();
+    if (sampleRows.length > 0) {
+      const colNames = sample.schema.fields.map(f => f.name);
+      schemaLines.push(`Sample rows (${colNames.join(', ')}):`);
+      sampleRows.forEach(row => {
+        schemaLines.push(`  [${row.map(v => v === null ? 'NULL' : String(v).substring(0, 40)).join(', ')}]`);
+      });
+    }
+  } catch(e) {}
+
+  const sqlPrompt = `You are a DuckDB SQL expert. Given this schema:
+
+${schemaLines.join('\n')}
+
+Convert this natural language question to a SINGLE DuckDB SQL query:
+"${question}"
+
+Rules:
+- Return ONLY the SQL, no explanation, no markdown fences
+- Use proper quoting for column names (double quotes)
+- Prefer simple, readable SQL over complex CTEs
+- Use DuckDB functions where helpful (e.g., strftime, regexp_matches)
+- NEVER use DELETE, UPDATE, INSERT, or DROP — SELECT only`;
 
   addMessage('assistant', '🤔 Generating SQL...');
 
@@ -428,9 +486,8 @@ async function askAI() {
 
     addMessage('assistant', `<div class="sql">${sql}</div>`);
 
-    // Execute SQL — use remote prefix for table references
-    const prefix = quackConnected ? 'remote.' : '';
-    const execSql = sql.replace(new RegExp(`\\b${currentTable}\\b`, 'g'), `${prefix}${currentTable}`);
+    // Execute SQL — AI already uses remote.sales as table reference when Quack is connected
+    const execSql = quackConnected ? sql : sql.replace(new RegExp(`\\b${currentTable}\\b`, 'g'), `${currentTable}`);
     const execResult = await conn.query(execSql);
     const cols = execResult.schema.fields.map(f => f.name);
     const rows = execResult.toArray().map(row => {
