@@ -382,6 +382,11 @@ class CanvasGrid {
     const h = canvas.height;
     const C = this._colors;
 
+    if (canvas.width === 0 || canvas.height === 0) {
+      console.warn('[Grid] Canvas not sized yet, skipping draw');
+      return;
+    }
+
     // Clear
     ctx.fillStyle = C.bg;
     ctx.fillRect(0, 0, w, h);

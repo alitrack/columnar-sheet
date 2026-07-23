@@ -192,11 +192,14 @@ async function connectQuack() {
     btn.textContent = 'Quack: ON';
     btn.className = 'connected';
     setStatus('Quack connected');
+    console.log('[CS] Quack connected, loading tables...');
 
     await loadTableList();
+    console.log('[CS] Table list loaded, loading sales...');
     await loadTable('sales');
+    console.log('[CS] Sales table loaded, rows:', _ids?.length);
   } catch (e) {
-    console.error('Quack failed:', e);
+    console.error('[CS] Quack failed:', e);
     setStatus(`Quack failed: ${e.message.substring(0, 60)}`);
     await loadLocalFallback();
   }
@@ -275,6 +278,7 @@ async function loadTable(name, append = false) {
   currentTable = name;
   if (!append) { _pageOffset = 0; _ids = []; }
   setStatus(`Loading ${name}...`);
+  console.log(`[CS] loadTable('${name}', append=${append})`);
 
   const prefix = quackConnected ? 'remote.' : '';
 
@@ -291,10 +295,12 @@ async function loadTable(name, append = false) {
       }
     } catch(e) { _totalRows = 0; }
   }
+  console.log(`[CS] ${name} total rows: ${_totalRows}`);
 
   // Load page
   const result = await conn.query(`SELECT _id, * FROM ${prefix}${name} ORDER BY _id LIMIT ${PAGE_SIZE} OFFSET ${_pageOffset}`);
   const { colData, idData, colNames } = arrowToColumnar(result);
+  console.log(`[CS] Data loaded: ${colNames.length} cols, ${idData.length} rows, cols=[${colNames.join(',')}]`);
 
   _pageOffset += idData.length;
   if (append) {
@@ -312,6 +318,8 @@ async function loadTable(name, append = false) {
     _totalRows = grid.rowCount;
     grid.setTotalRows(_totalRows);
   }
+
+  console.log(`[CS] Calling grid.render(), visibleCols=${grid.visibleCols.length}, rowCount=${grid.rowCount}`);
 
   grid.render();
   updateLoadMoreBar();
