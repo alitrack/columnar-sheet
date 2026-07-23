@@ -158,7 +158,6 @@ async function initDuckDB() {
 // ── Convert DuckDB Arrow result to columnar format ──
 function arrowToColumnar(result) {
   const colNames = result.schema.fields.map(f => f.name);
-  const rows = result.toArray();
   const colData = {};
   const idData = [];
 
@@ -166,11 +165,21 @@ function arrowToColumnar(result) {
     colData[name] = [];
   }
 
-  for (const row of rows) {
-    colNames.forEach((name, i) => {
-      colData[name].push(row[i]);
-    });
-    if (colData._id) idData.push(colData._id[colData._id.length - 1]);
+  // DuckDB-Wasm Arrow: use getChildAt() for column vectors
+  const numRows = result.numRows;
+  for (let ci = 0; ci < result.numCols; ci++) {
+    const col = result.getChildAt(ci);
+    const name = colNames[ci];
+    const arr = col.toArray();
+    for (let ri = 0; ri < numRows; ri++) {
+      const v = arr[ri];
+      colData[name].push(v === undefined ? null : v);
+    }
+  }
+
+  // Extract _id separately
+  if (colData._id) {
+    for (const v of colData._id) idData.push(v);
   }
 
   return { colData, idData: colData._id || idData, colNames };
