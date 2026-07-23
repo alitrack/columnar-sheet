@@ -7,9 +7,9 @@
 <script src="canvas-grid.js"></script>
 <style>
   * { margin: 0; padding: 0; box-sizing: border-box; }
-  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e0e0e0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0f0f0f; color: #e0e0e0; transition: background 0.3s, color 0.3s; }
   #app { display: flex; flex-direction: column; height: 100vh; }
-  #toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #1a1a1a; border-bottom: 1px solid #333; min-height: 40px; }
+  #toolbar { display: flex; align-items: center; gap: 10px; padding: 8px 14px; background: #1a1a1a; border-bottom: 1px solid #333; min-height: 40px; transition: background 0.3s; }
   #toolbar h1 { font-size: 17px; color: #f0c040; margin-right: 20px; }
   #toolbar button { padding: 5px 14px; border: 1px solid #444; background: #2a2a2a; color: #ccc; border-radius: 4px; cursor: pointer; font-size: 12px; white-space: nowrap; }
   #toolbar button:hover { background: #3a3a3a; }
@@ -24,13 +24,15 @@
   #content { display: flex; flex: 1; overflow: hidden; }
   #grid-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
   #grid-container { flex: 1; overflow: hidden; position: relative; }
-  #sidebar { width: 340px; background: #141414; border-left: 1px solid #333; display: flex; flex-direction: column; }
+  #sidebar { width: 340px; background: #141414; border-left: 1px solid #333; display: flex; flex-direction: column; transition: background 0.3s, border-color 0.3s; }
   #sidebar-tabs { display: flex; border-bottom: 1px solid #333; }
   #sidebar-tabs button { flex: 1; padding: 9px; background: none; border: none; color: #888; cursor: pointer; font-size: 13px; }
   #sidebar-tabs button.active { color: #f0c040; border-bottom: 2px solid #f0c040; }
   #ai-panel { flex: 1; display: flex; flex-direction: column; padding: 12px; overflow: hidden; }
   #ai-messages { flex: 1; overflow-y: auto; font-size: 13px; margin-bottom: 10px; }
   #ai-messages .msg { margin-bottom: 8px; padding: 8px; border-radius: 6px; word-break: break-word; }
+  #ai-input { flex: 1; padding: 8px; background: #0d0d0d; border: 1px solid #333; border-radius: 4px; color: #e0e0e0; font-size: 13px; transition: background 0.3s, border-color 0.3s, color 0.3s; }
+  #formula-bar, #ai-input { transition: background 0.3s, border-color 0.3s, color 0.3s; }
   #ai-messages .msg.user { background: #1e3a5f; margin-left: 24px; }
   #ai-messages .msg.assistant { background: #1a2a1a; margin-right: 24px; }
   #ai-messages .msg.sql { font-family: monospace; background: #0d0d0d; padding: 8px; border-radius: 4px; margin: 4px 0; font-size: 12px; color: #7ec87e; white-space: pre-wrap; }
@@ -52,6 +54,11 @@
   </div>
   <div id="toolbar">
     <h1>🦆 ColumnarSheet</h1>
+    <select id="theme-selector" onchange="setAppTheme(this.value)" style="padding:4px 8px;background:#0d0d0d;border:1px solid #444;border-radius:4px;color:#ccc;font-size:12px;cursor:pointer;">
+      <option value="dark">🌙 Dark</option>
+      <option value="light">☀️ Light</option>
+      <option value="auto">💻 System</option>
+    </select>
     <button id="btn-quack" class="disconnected" onclick="connectQuack()">Quack: OFF</button>
     <button onclick="undo()" title="Undo (Ctrl+Z)">↩</button>
     <button onclick="redo()" title="Redo (Ctrl+Y)">↪</button>
@@ -959,6 +966,64 @@ async function loadStats() {
 }
 
 // ── UI ──
+function setAppTheme(mode) {
+  if (!grid) return;
+  const actual = grid.setTheme(mode);
+  const C = grid.getColors();
+  document.getElementById('theme-selector').value = mode;
+
+  // Update CSS elements to match theme
+  const root = document.body.style;
+  root.background = C.appBg;
+  root.color = C.toolbarText;
+
+  const toolbar = document.getElementById('toolbar').style;
+  toolbar.background = C.toolbarBg;
+  toolbar.borderBottomColor = C.sidebarBorder;
+
+  const sidebar = document.getElementById('sidebar').style;
+  sidebar.background = C.sidebarBg;
+  sidebar.borderLeftColor = C.sidebarBorder;
+
+  // Input fields
+  ['formula-bar', 'ai-input', 'ai-api-key', 'ai-endpoint', 'ai-model'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) {
+      el.style.background = C.inputBg;
+      el.style.borderColor = C.inputBorder;
+      el.style.color = C.inputText;
+    }
+  });
+
+  // Buttons
+  document.querySelectorAll('#toolbar button').forEach(btn => {
+    btn.style.background = C.buttonBg;
+    btn.style.borderColor = C.buttonBorder;
+    btn.style.color = C.buttonText;
+  });
+
+  // Theme selector
+  const sel = document.getElementById('theme-selector');
+  if (sel) { sel.style.background = C.inputBg; sel.style.borderColor = C.inputBorder; sel.style.color = C.inputText; }
+
+  // Status
+  document.getElementById('status').style.color = C.headerText;
+
+  // Sidebar tabs
+  document.querySelectorAll('#sidebar-tabs button').forEach(b => {
+    b.style.color = C.sidebarTabText;
+  });
+
+  // Save preference
+  try { localStorage.setItem('columnar-sheet-theme', mode); } catch(e) {}
+}
+
+// System theme change listener
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (e) => {
+  const saved = localStorage.getItem('columnar-sheet-theme') || 'dark';
+  if (saved === 'auto') setAppTheme('auto');
+});
+
 function switchTab(tab) {
   document.querySelectorAll('#sidebar-tabs button').forEach(b => b.classList.remove('active'));
   const idx = tab === 'ai' ? 0 : tab === 'tables' ? 1 : 2;
@@ -1006,6 +1071,7 @@ window.onAIBackendChange = onAIBackendChange;
 window.addRow = addRow;
 window.deleteSelectedRows = deleteSelectedRows;
 window.executeFormula = executeFormula;
+window.setAppTheme = setAppTheme;
 window.undo = undo;
 window.redo = redo;
 window.importCSV = importCSV;
@@ -1031,6 +1097,9 @@ window.currentTable = currentTable;
   try {
     await initDuckDB();
     initGrid();
+    // Restore theme preference
+    const savedTheme = localStorage.getItem('columnar-sheet-theme') || 'dark';
+    setAppTheme(savedTheme);
     await connectQuack();
     loading.classList.add('hidden');
     setTimeout(() => loading.remove(), 500);

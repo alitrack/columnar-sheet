@@ -58,25 +58,73 @@ class CanvasGrid {
     this._ctx = null;
     this._dpr = window.devicePixelRatio || 1;
 
-    // Colors (dark theme)
-    this._colors = {
-      bg:          '#0f0f0f',
-      headerBg:    '#1e1e1e',
-      headerText:  '#aaa',
-      headerSort:  '#f0c040',
-      cellBg:      '#0f0f0f',
-      cellBgAlt:   '#151515',
-      cellText:    '#ddd',
-      cellNum:     '#7ec87e',
-      cellDate:    '#87ceeb',
-      gridLine:    '#2a2a2a',
-      selectionBg: '#1e3a5f',
-      selectionBorder: '#4a90d9',
-      editBg:      '#ffffff',
-      editText:    '#0f0f0f',
-      rowNumBg:    '#181818',
-      rowNumText:  '#777',
+    // Themes
+    this._theme = 'dark';
+    this._themes = {
+      dark: {
+        bg:             '#0f0f0f',
+        headerBg:       '#1e1e1e',
+        headerText:     '#bbb',
+        headerSort:     '#f0c040',
+        cellBg:         '#0f0f0f',
+        cellBgAlt:      '#181818',
+        cellText:       '#f0f0f0',
+        cellNum:        '#7ec87e',
+        cellDate:       '#87ceeb',
+        gridLine:       '#333',
+        selectionBg:    '#1e3a5f',
+        selectionBorder:'#4a90d9',
+        rowNumBg:       '#1a1a1a',
+        rowNumText:     '#999',
+        appBg:          '#0f0f0f',
+        toolbarBg:      '#1a1a1a',
+        toolbarText:    '#e0e0e0',
+        sidebarBg:      '#141414',
+        sidebarBorder:  '#333',
+        sidebarTabBg:   '#1a1a1a',
+        sidebarTabText: '#999',
+        inputBg:        '#0d0d0d',
+        inputBorder:    '#333',
+        inputText:      '#e0e0e0',
+        buttonBg:       '#2a2a2a',
+        buttonBorder:   '#444',
+        buttonText:     '#ccc',
+        msgUserBg:      '#1e3a5f',
+        msgAsstBg:      '#1a2a1a',
+      },
+      light: {
+        bg:             '#ffffff',
+        headerBg:       '#f2f2f2',
+        headerText:     '#555',
+        headerSort:     '#c87500',
+        cellBg:         '#ffffff',
+        cellBgAlt:      '#f8f8f8',
+        cellText:       '#222',
+        cellNum:        '#1a6e1a',
+        cellDate:       '#1a5e9e',
+        gridLine:       '#ddd',
+        selectionBg:    '#cce5ff',
+        selectionBorder:'#4a90d9',
+        rowNumBg:       '#f0f0f0',
+        rowNumText:     '#999',
+        appBg:          '#ffffff',
+        toolbarBg:      '#f5f5f5',
+        toolbarText:    '#333',
+        sidebarBg:      '#fafafa',
+        sidebarBorder:  '#ddd',
+        sidebarTabBg:   '#f5f5f5',
+        sidebarTabText: '#777',
+        inputBg:        '#ffffff',
+        inputBorder:    '#ccc',
+        inputText:      '#333',
+        buttonBg:       '#f0f0f0',
+        buttonBorder:   '#ccc',
+        buttonText:     '#333',
+        msgUserBg:      '#d0e0ff',
+        msgAsstBg:      '#d0f0d0',
+      },
     };
+    this._colors = this._themes.dark;
 
     // Event handlers
     this._handlers = {};
@@ -206,13 +254,28 @@ class CanvasGrid {
       const s = String(v).trim();
       if (s === '' || s === 'NULL' || s === 'null') continue;
       if (!isNaN(Number(s)) && s !== '') { numCount++; continue; }
-      // Detect date patterns
       if (/^\d{4}-\d{2}-\d{2}/.test(s) || /^\d{1,2}\/\d{1,2}\/\d{2,4}/.test(s)) { dateCount++; continue; }
     }
     if (numCount > sample * 0.6) return 'number';
     if (dateCount > sample * 0.5) return 'date';
     return 'text';
   }
+
+  /** Set theme: 'dark', 'light', or 'auto' (follow system) */
+  setTheme(mode) {
+    if (mode === 'auto') {
+      mode = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    this._theme = mode;
+    this._colors = this._themes[mode] || this._themes.dark;
+    this._draw();
+    return mode;
+  }
+
+  /** Get current theme colors (for external CSS updates) */
+  getColors() { return this._colors; }
+
+  get theme() { return this._theme; }
 
   /** Render everything */
   render() {
