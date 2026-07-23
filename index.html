@@ -891,6 +891,7 @@ Rules:
   const cacheTag = cached ? ' ⚡cached' : '';
   addMessage('assistant', `<div class="sql">${sql}${cacheTag}</div>`);
 
+  try {
     // Execute SQL
     const execSql = quackConnected ? sql : sql.replace(new RegExp(`\\b${currentTable}\\b`, 'g'), currentTable);
     const execResult = await conn.query(execSql);
