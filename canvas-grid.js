@@ -61,21 +61,21 @@ class CanvasGrid {
     // Colors (dark theme)
     this._colors = {
       bg:          '#0f0f0f',
-      headerBg:    '#1a1a1a',
-      headerText:  '#888',
+      headerBg:    '#1e1e1e',
+      headerText:  '#aaa',
       headerSort:  '#f0c040',
       cellBg:      '#0f0f0f',
-      cellBgAlt:   '#111111',
-      cellText:    '#e0e0e0',
+      cellBgAlt:   '#151515',
+      cellText:    '#ddd',
       cellNum:     '#7ec87e',
       cellDate:    '#87ceeb',
-      gridLine:    '#1a1a1a',
+      gridLine:    '#2a2a2a',
       selectionBg: '#1e3a5f',
       selectionBorder: '#4a90d9',
       editBg:      '#ffffff',
       editText:    '#0f0f0f',
-      rowNumBg:    '#141414',
-      rowNumText:  '#666',
+      rowNumBg:    '#181818',
+      rowNumText:  '#777',
     };
 
     // Event handlers
