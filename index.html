@@ -178,27 +178,16 @@ function arrowToColumnar(result) {
       let v = arr[ri];
       if (v === undefined || v === null) {
         colData[name].push(null);
+      } else if (v instanceof Date) {
+        // Arrow Date32/Date64 already returns JS Date objects
+        colData[name].push(v.toISOString().slice(0, 10));
       } else if (typeStr.includes('date') && typeof v === 'number') {
-        // DuckDB DATE = days since 1970-01-01, convert to ISO string
-        const ms = v * 86400000;
-        if (isNaN(ms) || !isFinite(ms)) {
-          colData[name].push(v);
-        } else {
-          const d = new Date(ms);
-          if (isNaN(d.getTime())) {
-            colData[name].push(v);
-          } else {
-            colData[name].push(d.toISOString().slice(0, 10));
-          }
-        }
-      } else if (typeStr.includes('timestamp') && typeof v === 'bigint') {
-        // DuckDB TIMESTAMP = microseconds since epoch
-        const ts = new Date(Number(v) / 1000);
-        if (isNaN(ts.getTime())) {
-          colData[name].push(v);
-        } else {
-          colData[name].push(ts.toISOString().replace('T', ' ').slice(0, 19));
-        }
+        // Fallback: raw day count from some Arrow implementations
+        const d = new Date(v * 86400000);
+        colData[name].push(isNaN(d.getTime()) ? v : d.toISOString().slice(0, 10));
+      } else if (typeStr.includes('timestamp') && (typeof v === 'bigint' || typeof v === 'number')) {
+        const ts = new Date(typeof v === 'bigint' ? Number(v) / 1000 : v);
+        colData[name].push(isNaN(ts.getTime()) ? v : ts.toISOString().replace('T', ' ').slice(0, 19));
       } else {
         colData[name].push(v);
       }
